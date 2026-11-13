@@ -15,6 +15,10 @@ rust-version = "1.82"
 license = "MIT"
 
 [workspace.dependencies]
+serde = { version = "=1.0.229", features = ["derive"] }
+url = { version = "=2.5.8", features = ["serde"] }
+serde_json = "=1.0.154"
+
 kino-core = { path = "crates/kino-core" }
 kino-api = { path = "crates/kino-api" }
 kino-player = { path = "crates/kino-player" }
