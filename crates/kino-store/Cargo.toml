@@ -1,0 +1,10 @@
+[package]
+name = "kino-store"
+description = "SQLite-хранилище: прогресс, избранное, файловый кэш"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+kino-core.workspace = true

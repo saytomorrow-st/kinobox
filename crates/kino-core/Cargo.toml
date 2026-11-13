@@ -1,0 +1,9 @@
+[package]
+name = "kino-core"
+description = "Доменные типы и трейты KinoBox без сетевых зависимостей"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]

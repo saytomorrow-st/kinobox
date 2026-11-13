@@ -1,0 +1,10 @@
+[package]
+name = "kino-api"
+description = "HTTP-клиент, зеркала, сессия и парсинг HDrezka"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+kino-core.workspace = true

@@ -1,0 +1,22 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/kino-core",
+    "crates/kino-api",
+    "crates/kino-player",
+    "crates/kino-store",
+    "crates/kino-ipc",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+license = "MIT"
+
+[workspace.dependencies]
+kino-core = { path = "crates/kino-core" }
+kino-api = { path = "crates/kino-api" }
+kino-player = { path = "crates/kino-player" }
+kino-store = { path = "crates/kino-store" }
+kino-ipc = { path = "crates/kino-ipc" }
