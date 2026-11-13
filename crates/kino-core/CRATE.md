@@ -1,7 +1,7 @@
 # kino-core
 
-Доменные типы KinoBox. Зависимости крейта — только `serde` и `url`; сеть,
-хранилище и плеер здесь не живут. Все публичные типы также реэкспортированы
+Доменные типы KinoBox. Зависимости крейта — только `serde`, `url` и
+`thiserror`; сеть, хранилище и плеер здесь не живут. Все публичные типы также реэкспортированы
 из корня крейта (`kino_core::MediaItem` и т.д.).
 
 ## Медиа (`media`)
@@ -33,6 +33,67 @@
 | `UserSession` | `user_id: u64`, `username: String` |
 
 Секретов в типе нет: пароль, куки и токены хранятся только в macOS Keychain.
+
+## Ошибки (`error`)
+
+`pub type Result<T> = std::result::Result<T, KinoError>`.
+
+`KinoError` — `Debug, Clone, PartialEq, Eq`, сообщения (`Display`) на русском.
+Типы сетевых библиотек в варианты не попадают: транспортные ошибки
+конвертируются в строку.
+
+| Вариант | Смысл |
+|---|---|
+| `Network(String)` | транспортная ошибка: DNS, таймаут, соединение |
+| `Http { status: u16 }` | сервер ответил неуспешным статусом |
+| `Parse(String)` | сменилась вёрстка или неожиданный формат ответа |
+| `Deobfuscation(String)` | не удалось разобрать ссылку потока |
+| `AllMirrorsUnavailable` | ни одно зеркало не ответило |
+| `AuthRequired` | нужна авторизация |
+| `Challenge` | сайт требует защитный челлендж (например, Anubis PoW), клиент его не прошёл |
+| `NotFound` | произведение или страница не найдены |
+
+`is_retryable(&self) -> bool` — `true` для `Network` и для `Http` со статусом
+`429` или `500..=599`; для остальных вариантов `false`.
+
+## Провайдер (`provider`)
+
+| Тип | Поля |
+|---|---|
+| `CatalogQuery` | `kind: Option<MediaKind>` (`None` — все типы), `page: u32` (с 1) |
+| `StreamRequest` | `id: u64`, `translator_id: u64`, `season: Option<u16>`, `episode: Option<u16>` (для фильмов `season`/`episode` = `None`) |
+
+Оба типа: `Debug, Clone, PartialEq, Serialize, Deserialize`.
+
+```rust
+pub trait KinoProvider: Send + Sync {
+    fn search(&self, query: &str)
+        -> impl Future<Output = Result<Vec<MediaItem>>> + Send;
+    fn catalog(&self, query: CatalogQuery)
+        -> impl Future<Output = Result<Vec<MediaItem>>> + Send;
+    fn details(&self, item: &MediaItem)
+        -> impl Future<Output = Result<MediaDetails>> + Send;
+    fn episodes(&self, id: u64, translator_id: u64)
+        -> impl Future<Output = Result<Vec<Season>>> + Send;
+    fn streams(&self, request: StreamRequest)
+        -> impl Future<Output = Result<StreamSource>> + Send;
+}
+```
+
+Без `async-trait`: реализации пишут обычные `async fn`, а `Send` у future
+гарантирует сигнатура трейта. Трейт не object-safe, используется как
+generic-параметр.
+
+Контракт ошибок. Любой метод вправе вернуть `Network`, `Http`,
+`AllMirrorsUnavailable` и `Challenge`. Дополнительно:
+
+| Метод | Специфичные ошибки и особенности |
+|---|---|
+| `search` | `Parse`; запрос не нормализуется, пустая выдача — `Ok(vec![])`, не `NotFound` |
+| `catalog` | `Parse`; страницы нумеруются с 1 |
+| `details` | `NotFound`, `Parse` |
+| `episodes` | `NotFound`, `Parse` |
+| `streams` | `NotFound`, `Parse`, `Deobfuscation`, `AuthRequired`; возвращает `StreamSource` после деобфускации, не сырую строку |
 
 ## Соглашения
 
