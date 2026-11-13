@@ -24,6 +24,7 @@ pollster = { version = "=1.0.1", default-features = false }
 wreq = { version = "=0.16.3", features = ["cookies", "form"] }
 tokio = { version = "=1.54.1", default-features = false }
 wiremock = "=0.6.5"
+futures-util = { version = "=0.3.34", default-features = false, features = ["alloc"] }
 
 kino-core = { path = "crates/kino-core" }
 kino-api = { path = "crates/kino-api" }
