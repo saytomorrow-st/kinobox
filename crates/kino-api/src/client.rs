@@ -47,6 +47,8 @@ pub struct Response {
     pub body: Vec<u8>,
     /// Сколько запросов отправлено, включая успешный (минимум 1).
     pub attempts: u32,
+    /// Адрес, с которого получен ответ, после всех редиректов.
+    pub final_url: Url,
 }
 
 impl Response {
@@ -151,6 +153,7 @@ impl HttpClient {
         let response = request.send().await.map_err(map_transport_error)?;
 
         let status = response.status().as_u16();
+        let final_url = Url::parse(&response.uri().to_string()).unwrap_or_else(|_| url.clone());
         let headers: Vec<(String, String)> = response
             .headers()
             .iter()
@@ -172,6 +175,7 @@ impl HttpClient {
             headers,
             body,
             attempts: 0,
+            final_url,
         };
 
         if status < 400 {
@@ -524,6 +528,7 @@ mod tests {
         assert_eq!(response.status, 200);
         assert_eq!(response.text(), "moved");
         assert_eq!(response.attempts, 1);
+        assert_eq!(response.final_url, url(&server, "/new"));
     }
 
     #[tokio::test]

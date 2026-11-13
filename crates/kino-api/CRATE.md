@@ -42,6 +42,7 @@ let reply = client.post_form(&url, &[("q", "кино")]).await?;
 | `headers: Vec<(String, String)>` | заголовки, имена в нижнем регистре |
 | `body: Vec<u8>` | сырое тело |
 | `attempts: u32` | сколько запросов отправлено, включая успешный (минимум 1) |
+| `final_url: Url` | адрес, с которого получен ответ, после всех редиректов |
 | `text() -> String` | тело как UTF-8 (lossy) |
 | `header(name) -> Option<&str>` | заголовок без учёта регистра |
 
@@ -72,6 +73,93 @@ let reply = client.post_form(&url, &[("q", "кино")]).await?;
 (имя или значение) есть `anubis` или `Making sure you're not a bot` без учёта регистра.
 Результат — `KinoError::Challenge`, без retry. Прохождение PoW клиент не реализует: это отдельная
 задача, её запуск согласуется с заказчиком. 403 и 503 без маркеров обрабатываются как обычные ошибки.
+
+## Зеркала (`mirrors`)
+
+Реэкспортировано из корня крейта: `MirrorPool`, `MirrorConfig`, `MirrorStatus`, `MirrorStore`,
+`MemoryMirrorStore`, `LOGIN_STUB_MARKERS`.
+
+### MirrorConfig
+
+`MirrorConfig::new() -> Result<MirrorConfig>` возвращает значения по умолчанию из таблицы.
+`Default` не реализован: разбор адреса standby может вернуть ошибку, паниковать нельзя.
+
+| Поле | По умолчанию | Смысл |
+|---|---|---|
+| `known: Vec<Url>` | пусто | известные зеркала, пробуются по очереди. Списка рабочих доменов в репозитории нет, его даёт заказчик |
+| `standby: Url` | `https://standby-rezka.tv/` | адрес, который должен редиректить на актуальное зеркало |
+| `probe_timeout: Duration` | 5 с | лимит на одну пробу |
+| `dead_ttl: Duration` | 60 с | сколько зеркало после `mark_dead` пропускается |
+
+### MirrorStore
+
+```rust
+pub trait MirrorStore: Send + Sync {
+    fn active(&self) -> impl Future<Output = Option<Url>> + Send;
+    fn set_active(&self, url: Url) -> impl Future<Output = ()> + Send;
+    fn clear_active(&self) -> impl Future<Output = ()> + Send;
+}
+```
+
+Трейт объявлен в `kino-api`, потому что зависимость `kino-api` -> `kino-store` запрещена.
+`MemoryMirrorStore` (`new()`, `with_active(Url)`) держит значение в памяти. SQLite-реализация
+придёт из `kino-store` в M2.
+
+### MirrorPool
+
+```rust
+let client = HttpClient::new(ClientConfig::default())?;
+let pool = MirrorPool::new(&client, MemoryMirrorStore::new(), MirrorConfig::new()?)?;
+let base = pool.resolve().await?;
+```
+
+- `new(&HttpClient, S, MirrorConfig) -> Result<MirrorPool<S>>`: строит отдельный клиент для проб
+  (`max_retries = 0`, `timeout = probe_timeout`, `User-Agent` как у переданного клиента). Cookie проб
+  не смешиваются с основным клиентом. Ошибка сборки клиента приходит как `KinoError::Network`.
+- `resolve() -> Result<Url>`: идёт по порядку проб, первое живое зеркало делает активным в store.
+  Если живых нет, возвращает `KinoError::AllMirrorsUnavailable`.
+- `health_check() -> Vec<MirrorStatus>`: параллельно пробует все `known`, порядок результата как в конфиге.
+  Активное зеркало и standby не затрагивает, store не меняет.
+- `probe_standby() -> MirrorStatus`: проба standby; если редирект есть, `url` в статусе — корень зеркала.
+- `add_manual(Url) -> Result<Url>`: проба введённого адреса. Живой становится активным. Недоступный
+  возвращает ошибку с причиной (`Http`, `Challenge`, `Network` или `Parse` для заглушки входа),
+  активное не меняется.
+- `mark_dead(&Url)`: зеркало пропускается `dead_ttl`; если оно было активным, активное сбрасывается,
+  и следующий `resolve` ротирует на другое. Пометка живёт в памяти пула.
+- `store() -> &S`, `config() -> &MirrorConfig`.
+
+`MirrorStatus { url, alive, reason: Option<String>, latency: Option<Duration> }`: у живого `reason = None`,
+`latency` пуста, если ответа не было (сеть, таймаут, челлендж, 4xx/5xx).
+
+### Порядок проб
+
+1. Активное зеркало из store (если не помечено мёртвым).
+2. `known` по очереди (уже опробованное активное пропускается).
+3. `standby`: GET с редиректами, берётся итоговый URL. Если хост и порт итогового URL совпадают
+   с standby, редиректа нет и standby зеркалом **не считается**. Иначе корень итогового URL проверяется
+   теми же правилами и становится активным.
+4. Ручной ввод: `add_manual`, вызывается отдельно из настроек.
+
+### Что считается живым зеркалом
+
+Статус 2xx, непустое тело и тело **не** содержит ни одного маркера из `LOGIN_STUB_MARKERS`
+(`id="loginForm"`, `Вход на HDrezka`). Часть зеркал и сам standby отдают 200 со страницей входа,
+поэтому один статус 200 ничего не доказывает. Список маркеров лежит одной константой в начале
+`src/mirrors.rs`, обновлять при поломке. Других признаков «настоящей главной» нет.
+Статусы 4xx/5xx и `Challenge` (Anubis) делают зеркало недоступным, причина попадает в `reason`.
+Проба: один GET главной страницы, без retry.
+
+### Проверка руками
+
+```
+cargo run -p kino-api --example mirrors -- [--known URL]... [--manual URL]
+```
+
+Печатает `health_check` и результат пробы standby, по строке на адрес:
+`OK|DEAD  <url>  <latency ms>  <причина>`. Затем `active: <url>` (код 0) или ошибку в stderr (код 1).
+С `--manual` вместо `resolve` вызывается `add_manual`. Неверные аргументы дают код 2.
+Без аргументов standby сейчас сообщается как заглушка входа, итог `AllMirrorsUnavailable`.
+Каждый адрес запрашивается до двух раз: один раз для вывода статуса, второй раз внутри `resolve`.
 
 ## Деобфускация (`deobfuscate`)
 
@@ -123,7 +211,9 @@ cargo test -p kino-api
 ```
 
 Тесты на `wiremock`, без реальной сети: retry на 503, исчерпание попыток, 404 без retry, Challenge,
-таймаут, `Retry-After`, `post_form`, редирект, cookie между запросами, отказ соединения.
+таймаут, `Retry-After`, `post_form`, редирект (включая `final_url`), cookie между запросами, отказ соединения.
+Для `mirrors`: выбор активного без обхода списка, fallback на `known`, заглушка входа, standby с редиректом и
+без, таймаут пробы, Challenge, `mark_dead` с TTL, `add_manual`, порядок `health_check`.
 
 ## Сборка
 
