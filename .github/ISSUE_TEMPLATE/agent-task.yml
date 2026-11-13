@@ -1,0 +1,29 @@
+name: Задача для агента
+description: Структурированная задача для автоматической реализации
+labels: [agent]
+body:
+  - type: input
+    id: crate
+    attributes:
+      label: Крейт
+      options: [kino-core, kino-api, kino-player, kino-store, kino-ipc, ui, ci, docs]
+  - type: dropdown
+    id: type
+    attributes:
+      label: Тип
+      options: [feature, bug, change]
+  - type: textarea
+    id: task
+    attributes:
+      label: Задача
+    validations:
+      required: true
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Ограничения
+  - type: textarea
+    id: done
+    attributes:
+      label: Готово когда
+      placeholder: "cargo test -p kino-api проходит"

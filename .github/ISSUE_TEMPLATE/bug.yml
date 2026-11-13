@@ -1,0 +1,39 @@
+name: Баг
+description: Что-то в приложении работает не так
+labels: [bug]
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Где проблема
+      options: [Плеер, Главная, Каталог, Поиск, Сериалы, Избранное, Настройки, Обновление, Другое]
+  - type: textarea
+    id: what
+    attributes:
+      label: Что ожидалось
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Что произошло
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Шаги воспроизведения
+      placeholder: |
+        1. Открыл Главную
+        2. Нажал на карточку фильма
+        3. ...
+  - type: input
+    id: version
+    attributes:
+      label: Версия приложения
+      placeholder: "0.1.0"
+  - type: textarea
+    id: logs
+    attributes:
+      label: Логи
+      render: shell

@@ -1,0 +1,22 @@
+name: Новая возможность
+description: Чего не хватает в приложении
+labels: [enhancement]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: Что хочется
+      description: Опишите как заказчик, без технических деталей
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Зачем
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Раздел
+      options: [Главная, Каталог, Плеер, Сериалы, Поиск, Избранное, Настройки, Общее]
