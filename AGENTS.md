@@ -66,7 +66,7 @@ KinoBox — это десктопный клиент HDrezka API. Онлайн-�
 | Тесты, фикстуры | `deepseek-flash` | low |
 | Boilerplate, типы, serde | `deepseek-flash` | low |
 | SQLite схема + миграции | `glm-5.3-flash` | low |
-| CI, release.yml, updater, конфиги | `deepseek-v4.1-flash-free` | low |
+| CI, release.yml, updater, конфиги | `deepseek-flash` | low |
 | README, docs, changelog | `kimi-k3.1-pro` | low |
 | Ревью PR | `codex-auto-review` | low |
 | Anubis PoW, крипто-арифметика | `claude-opus-5-5` | high | 

@@ -1,8 +1,8 @@
 ---
 id: 001
 type: feature
-status: open
-model: deepseek-v4.1-flash-free
+status: review
+model: deepseek-flash
 crate: workspace
 created: 2026-11-13
 ---
@@ -27,3 +27,9 @@ Cargo workspace из 5 крейтов (`kino-core`, `kino-api`, `kino-player`, `
 ## Заметки
 
 Риск: `rquest` тянет BoringSSL, кросс-сборка x86_64 на Apple Silicon может потребовать cmake/NASM. Проверить в этой задаче, не откладывать на релиз. Если не собирается, остановиться и спросить заказчика про замену на `reqwest` + `rustls`.
+
+2026-11-13: workspace готов, `check`/`test`/`fmt`/`clippy` и `cargo check` под оба target'а зелёные.
+- Внешних зависимостей пока нет, поэтому риск с `rquest`/BoringSSL остаётся непроверенным. Проверить в #004, когда он появится в `Cargo.toml`. Машина разработки сейчас x86_64, aarch64 проверен только через `cargo check`.
+- Cargo печатает предупреждения `unused dependency` для внутренних зависимостей: `lib.rs` пусты. Пропадут в #002–#007.
+- Файла `LICENSE` в репозитории нет, хотя README и `Cargo.toml` заявляют MIT. Нужна отдельная задача.
+- `ci.yml` запускается на ветке `main`, а локальная ветка называется `master`. Проверить при настройке remote.

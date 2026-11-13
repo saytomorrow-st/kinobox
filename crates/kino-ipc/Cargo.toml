@@ -1,0 +1,13 @@
+[package]
+name = "kino-ipc"
+description = "Типизированные Tauri-команды — мост Rust и TypeScript"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+kino-core.workspace = true
+kino-api.workspace = true
+kino-player.workspace = true
+kino-store.workspace = true
