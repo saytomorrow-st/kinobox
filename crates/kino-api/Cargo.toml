@@ -8,3 +8,10 @@ license.workspace = true
 
 [dependencies]
 kino-core.workspace = true
+url.workspace = true
+wreq.workspace = true
+tokio = { workspace = true, features = ["time"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }
+wiremock.workspace = true
