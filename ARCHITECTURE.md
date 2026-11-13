@@ -7,7 +7,7 @@
 | Ядро | Rust 2021, workspace из 5 крейтов |
 | Оболочка | Tauri v2 (native macOS, WKWebView) |
 | UI | React 18 + TypeScript + Zustand + Tailwind CSS |
-| Сеть | `rquest` (reqwest + BoringSSL impersonation), `tokio`, `serde` |
+| Сеть | `wreq` (преемник `rquest`, BoringSSL), `tokio`, `serde` |
 | Хранилище | SQLite (`sqlx`) + файловый кэш постеров |
 | Секреты | macOS Keychain (`keyring`) |
 | Плеер | `libmpv` через FFI |
