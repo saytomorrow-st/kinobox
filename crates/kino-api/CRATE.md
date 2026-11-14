@@ -95,20 +95,42 @@ let reply = client.post_form(&url, &[("q", "кино")]).await?;
 
 ## Зеркала (`mirrors`)
 
-Реэкспортировано из корня крейта: `MirrorPool`, `MirrorConfig`, `MirrorStatus`, `MirrorStore`,
-`MemoryMirrorStore`, `LOGIN_STUB_MARKERS`.
+Реэкспортировано из корня крейта: `MirrorPool`, `MirrorConfig`, `MirrorState`, `MirrorStatus`,
+`ResolvedMirror`, `MirrorStore`, `MemoryMirrorStore`, `LOGIN_STUB_MARKERS`.
+
+### Состояния зеркала
+
+`MirrorState { Open, NeedsLogin, Challenge, Dead }` (`Debug, Clone, Copy, PartialEq, Eq`).
+Определяется одним GET главной страницы, без retry. `is_usable()` истинно для `Open` и `NeedsLogin`.
+
+| Состояние | Признак | Что делает пул |
+|---|---|---|
+| `Open` | 2xx, непустое тело, нет маркеров из `LOGIN_STUB_MARKERS` | использует |
+| `NeedsLogin` | 2xx и есть маркер из `LOGIN_STUB_MARKERS` (`id="loginForm"`, `Вход на HDrezka`) | использует, перед работой нужен вход |
+| `Challenge` | `HttpClient` вернул `Err(KinoError::Challenge)` (см. «Правило про Challenge») | пропускает, PoW не реализован |
+| `Dead` | сеть, DNS, таймаут, не-2xx, пустое тело | пропускает |
+
+`NeedsLogin` считается живым зеркалом: приложение работает только со входом, и часть зеркал отдаёт форму
+входа вместо каталога. Куки привязаны к домену, поэтому `resolve` возвращает состояние вместе с адресом.
+Один статус 200 ничего не доказывает: форму входа и Anubis отдают тоже с 200. Список маркеров лежит
+константой в начале `src/mirrors.rs`, обновлять при поломке. Других признаков «настоящей главной» нет.
+Челлендж определяет только `HttpClient`, `mirrors` его не дублирует.
 
 ### MirrorConfig
 
 `MirrorConfig::new() -> Result<MirrorConfig>` возвращает значения по умолчанию из таблицы.
-`Default` не реализован: разбор адреса standby может вернуть ошибку, паниковать нельзя.
+`Default` не реализован: разбор адресов может вернуть ошибку, паниковать нельзя.
 
 | Поле | По умолчанию | Смысл |
 |---|---|---|
-| `known: Vec<Url>` | пусто | известные зеркала, пробуются по очереди. Списка рабочих доменов в репозитории нет, его даёт заказчик |
+| `known: Vec<Url>` | `https://kvk.pub/`, `https://rezka.fi/` (в этом порядке) | известные зеркала, пробуются по очереди |
 | `standby: Url` | `https://standby-rezka.tv/` | адрес, который должен редиректить на актуальное зеркало |
 | `probe_timeout: Duration` | 5 с | лимит на одну пробу |
 | `dead_ttl: Duration` | 60 с | сколько зеркало после `mark_dead` пропускается |
+
+В списке по умолчанию только два домена: их хост проверил заказчик. `rezka.si` отдаёт ту же страницу,
+но заказчик не подтвердил, что домен официальный, поэтому его нет в списке. Добавлять другие домены
+только после подтверждения заказчика.
 
 ### MirrorStore
 
@@ -122,33 +144,55 @@ pub trait MirrorStore: Send + Sync {
 
 Трейт объявлен в `kino-api`, потому что зависимость `kino-api` -> `kino-store` запрещена.
 `MemoryMirrorStore` (`new()`, `with_active(Url)`) держит значение в памяти. SQLite-реализация
-придёт из `kino-store` в M2.
+придёт из `kino-store` в M2. Store хранит только адрес, состояние не хранится: оно приходит из пробы.
+
+### Результаты
+
+```rust
+pub struct MirrorStatus {
+    pub url: Url,
+    pub state: MirrorState,
+    pub reason: Option<String>,
+    pub latency: Option<Duration>,
+}
+impl MirrorStatus { pub fn is_usable(&self) -> bool }
+
+pub struct ResolvedMirror {
+    pub url: Url,
+    pub state: MirrorState, // только Open или NeedsLogin
+}
+```
+
+`reason`: у `Open` `None`; у `NeedsLogin` «требуется вход»; у `Challenge` и `Dead` причина (`HTTP 503`,
+таймаут, пустой ответ и т. п.). `latency` пуста, если ответа не было (сеть, таймаут, `Challenge`, 4xx/5xx
+из-за ошибки клиента).
 
 ### MirrorPool
 
 ```rust
 let client = HttpClient::new(ClientConfig::default())?;
 let pool = MirrorPool::new(&client, MemoryMirrorStore::new(), MirrorConfig::new()?)?;
-let base = pool.resolve().await?;
+let mirror = pool.resolve().await?;
+if mirror.state == MirrorState::NeedsLogin {
+    // сначала вход на mirror.url
+}
 ```
 
 - `new(&HttpClient, S, MirrorConfig) -> Result<MirrorPool<S>>`: строит отдельный клиент для проб
   (`max_retries = 0`, `timeout = probe_timeout`, `User-Agent` как у переданного клиента). Cookie проб
   не смешиваются с основным клиентом. Ошибка сборки клиента приходит как `KinoError::Network`.
-- `resolve() -> Result<Url>`: идёт по порядку проб, первое живое зеркало делает активным в store.
-  Если живых нет, возвращает `KinoError::AllMirrorsUnavailable`.
+- `resolve() -> Result<ResolvedMirror>`: идёт по порядку проб, первое пригодное (`Open` или `NeedsLogin`)
+  делает активным в store. `Challenge` и `Dead` пропускаются. Если пригодных нет,
+  возвращает `KinoError::AllMirrorsUnavailable`.
 - `health_check() -> Vec<MirrorStatus>`: параллельно пробует все `known`, порядок результата как в конфиге.
   Активное зеркало и standby не затрагивает, store не меняет.
 - `probe_standby() -> MirrorStatus`: проба standby; если редирект есть, `url` в статусе — корень зеркала.
-- `add_manual(Url) -> Result<Url>`: проба введённого адреса. Живой становится активным. Недоступный
-  возвращает ошибку с причиной (`Http`, `Challenge`, `Network` или `Parse` для заглушки входа),
-  активное не меняется.
+- `add_manual(Url) -> Result<ResolvedMirror>`: проба введённого адреса. Пригодный (`Open` или `NeedsLogin`)
+  становится активным. `Challenge` возвращает `Err(KinoError::Challenge)`, прочее непригодное
+  возвращает ошибку пробы (`Http`, `Network`, `Parse` для пустого ответа). Активное при ошибке не меняется.
 - `mark_dead(&Url)`: зеркало пропускается `dead_ttl`; если оно было активным, активное сбрасывается,
   и следующий `resolve` ротирует на другое. Пометка живёт в памяти пула.
 - `store() -> &S`, `config() -> &MirrorConfig`.
-
-`MirrorStatus { url, alive, reason: Option<String>, latency: Option<Duration> }`: у живого `reason = None`,
-`latency` пуста, если ответа не было (сеть, таймаут, челлендж, 4xx/5xx).
 
 ### Порядок проб
 
@@ -156,17 +200,20 @@ let base = pool.resolve().await?;
 2. `known` по очереди (уже опробованное активное пропускается).
 3. `standby`: GET с редиректами, берётся итоговый URL. Если хост и порт итогового URL совпадают
    с standby, редиректа нет и standby зеркалом **не считается**. Иначе корень итогового URL проверяется
-   теми же правилами и становится активным.
+   теми же правилами и, если пригоден, становится активным.
 4. Ручной ввод: `add_manual`, вызывается отдельно из настроек.
 
-### Что считается живым зеркалом
+Приоритет задаёт порядок списка, а не «лучшее» состояние: `Open`-зеркало после `NeedsLogin`-зеркала в
+`known` не выбирается, пока `NeedsLogin` отвечает. Порядок `known` определяет пользователь, пул его
+не переставляет.
 
-Статус 2xx, непустое тело и тело **не** содержит ни одного маркера из `LOGIN_STUB_MARKERS`
-(`id="loginForm"`, `Вход на HDrezka`). Часть зеркал и сам standby отдают 200 со страницей входа,
-поэтому один статус 200 ничего не доказывает. Список маркеров лежит одной константой в начале
-`src/mirrors.rs`, обновлять при поломке. Других признаков «настоящей главной» нет.
-Статусы 4xx/5xx и `Challenge` (Anubis) делают зеркало недоступным, причина попадает в `reason`.
-Проба: один GET главной страницы, без retry.
+### Standby
+
+Сейчас `standby-rezka.tv` отдаёт форму входа без редиректа. Принимает ли он вход напрямую, не проверено
+(выяснится в #012), поэтому без редиректа он **не зеркало**. `probe_standby` в этом случае возвращает
+`state = NeedsLogin` (так выглядит его ответ) и `reason = "standby без редиректа на зеркало"`, а `resolve`
+его не использует. Для статусов без редиректа с другим состоянием (`Dead`, `Challenge`) к причине
+добавляется исходная в скобках.
 
 ### Проверка руками
 
@@ -175,10 +222,11 @@ cargo run -p kino-api --example mirrors -- [--known URL]... [--manual URL]
 ```
 
 Печатает `health_check` и результат пробы standby, по строке на адрес:
-`OK|DEAD  <url>  <latency ms>  <причина>`. Затем `active: <url>` (код 0) или ошибку в stderr (код 1).
-С `--manual` вместо `resolve` вызывается `add_manual`. Неверные аргументы дают код 2.
-Без аргументов standby сейчас сообщается как заглушка входа, итог `AllMirrorsUnavailable`.
+`OPEN|LOGIN|CHALLENGE|DEAD  <url>  <latency ms>  <причина>`. Затем `active: <url> (open|login required)`
+(код 0) или ошибку в stderr (код 1). `--known` можно повторять; если задан, список заменяет
+значение по умолчанию. С `--manual` вместо `resolve` вызывается `add_manual`. Неверные аргументы дают код 2.
 Каждый адрес запрашивается до двух раз: один раз для вывода статуса, второй раз внутри `resolve`.
+Результат зависит от IP и состояния сайта.
 
 ## Деобфускация (`deobfuscate`)
 
@@ -232,8 +280,10 @@ cargo test -p kino-api
 Тесты на `wiremock`, без реальной сети: retry на 503, исчерпание попыток, 404 без retry, Challenge,
 таймаут, `Retry-After`, `post_form`, Challenge при 200 (кука `techaro.lol-anubis*`, `<title>` на русском и
 английском, gzip-тело), отсутствие ложных срабатываний (слово «Anubis» в теле, страница входа), редирект (включая `final_url`), cookie между запросами, отказ соединения.
-Для `mirrors`: выбор активного без обхода списка, fallback на `known`, заглушка входа, standby с редиректом и
-без, таймаут пробы, Challenge, `mark_dead` с TTL, `add_manual`, порядок `health_check`.
+Для `mirrors`: все четыре состояния (в том числе 200 со страницей входа и 200 с Anubis по куке и по `<title>`),
+выбор активного без обхода списка, fallback на `known`, приоритет по порядку списка, standby с редиректом и без,
+таймаут пробы, `mark_dead` с TTL, `add_manual` (`NeedsLogin` принимается, `Challenge` не меняет активное),
+порядок и состояния в `health_check`.
 
 ## Сборка
 
