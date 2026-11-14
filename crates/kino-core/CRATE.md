@@ -10,11 +10,18 @@
 |---|---|
 | `MediaKind` | `Movie`, `Series`, `Cartoon`, `Anime` (serde `snake_case`) |
 | `MediaItem` | `id: u64`, `title: String`, `original_title: Option<String>`, `year: Option<u16>`, `kind: MediaKind`, `poster_url: Option<Url>`, `page_url: Url`, `rating: Option<f32>` |
-| `MediaDetails` | `item: MediaItem`, `description: Option<String>`, `genres: Vec<String>`, `countries: Vec<String>`, `duration_minutes: Option<u32>`, `translators: Vec<Translator>`, `seasons: Vec<Season>` |
+| `MediaDetails` | `item: MediaItem`, `description: Option<String>`, `genres: Vec<String>`, `countries: Vec<String>`, `duration_minutes: Option<u32>`, `translators: Vec<Translator>`, `seasons: Vec<Season>`, `raw_html: Option<String>` |
 | `Translator` | `id: u64`, `name: String` |
 | `Season` | `number: u16`, `episodes: Vec<u16>` |
+| `Episode` | `season_id: u32`, `episode_id: u32`, `title: String` |
 
-`MediaDetails::seasons` пуст для фильмов и заполнен для сериалов.
+`MediaDetails::seasons` пуст для фильмов и заполнен для сериалов. Поле
+`raw_html` помечено `#[serde(skip)]`: это кэш сырого HTML страницы деталей,
+нужный `kino-api` для извлечения данных плеера (`initCDN...Events`) при запросе
+потоков фильма; в сеть и в `Serialize` не попадает.
+
+`Episode` — серия сериала из `action=get_episodes`; в отличие от `Season`
+(список номеров со страницы деталей) несёт заголовок серии из `<li>`.
 
 ## Поток (`stream`)
 
@@ -78,9 +85,8 @@
 | Тип | Поля |
 |---|---|
 | `CatalogQuery` | `kind: Option<MediaKind>` (`None` — все типы), `page: u32` (с 1) |
-| `StreamRequest` | `id: u64`, `translator_id: u64`, `season: Option<u16>`, `episode: Option<u16>` (для фильмов `season`/`episode` = `None`) |
 
-Оба типа: `Debug, Clone, PartialEq, Serialize, Deserialize`.
+Тип: `Debug, Clone, PartialEq, Serialize, Deserialize`.
 
 ```rust
 pub trait KinoProvider: Send + Sync {
@@ -90,10 +96,10 @@ pub trait KinoProvider: Send + Sync {
         -> impl Future<Output = Result<Vec<MediaItem>>> + Send;
     fn details(&self, item: &MediaItem)
         -> impl Future<Output = Result<MediaDetails>> + Send;
-    fn episodes(&self, id: u64, translator_id: u64)
-        -> impl Future<Output = Result<Vec<Season>>> + Send;
-    fn streams(&self, request: StreamRequest)
-        -> impl Future<Output = Result<StreamSource>> + Send;
+    fn episodes(&self, details: &MediaDetails)
+        -> impl Future<Output = Result<Vec<Episode>>> + Send;
+    fn streams(&self, details: &MediaDetails, episode: Option<&Episode>)
+        -> impl Future<Output = Result<Vec<StreamQuality>>> + Send;
 }
 ```
 
@@ -109,8 +115,8 @@ generic-параметр.
 | `search` | `Parse`; запрос не нормализуется, пустая выдача — `Ok(vec![])`, не `NotFound` |
 | `catalog` | `Parse`; страницы нумеруются с 1 |
 | `details` | `NotFound`, `Parse` |
-| `episodes` | `NotFound`, `Parse` |
-| `streams` | `NotFound`, `Parse`, `Deobfuscation`, `AuthRequired`; возвращает `StreamSource` после деобфускации, не сырую строку |
+| `episodes` | `NotFound`, `Parse`; для фильма (`seasons` пусто) — `Ok(vec![])`; берёт перевод по умолчанию из `details.translators[0]`, возвращает плоский список [`Episode`] всех сезонов |
+| `streams` | `NotFound`, `Parse`, `Deobfuscation`, `AuthRequired`; для фильма `episode = None` (потоки из данных плеера на странице), для сериала — выбранная [`Episode`]; возвращает [`StreamQuality`] после деобфускации |
 
 ## Соглашения
 

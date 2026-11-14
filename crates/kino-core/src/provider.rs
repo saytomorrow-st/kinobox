@@ -5,8 +5,8 @@ use std::future::Future;
 use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
-use crate::media::{MediaDetails, MediaItem, MediaKind, Season};
-use crate::stream::StreamSource;
+use crate::media::{Episode, MediaDetails, MediaItem, MediaKind};
+use crate::stream::StreamQuality;
 
 /// Запрос страницы каталога.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -15,17 +15,6 @@ pub struct CatalogQuery {
     pub kind: Option<MediaKind>,
     /// Нумерация с 1.
     pub page: u32,
-}
-
-/// Запрос потока для выбранного перевода и серии.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct StreamRequest {
-    pub id: u64,
-    pub translator_id: u64,
-    /// Для фильмов `None`.
-    pub season: Option<u16>,
-    /// Для фильмов `None`.
-    pub episode: Option<u16>,
 }
 
 /// Источник каталога и потоков.
@@ -44,16 +33,19 @@ pub trait KinoProvider: Send + Sync {
     /// Подробная карточка. Может вернуть `NotFound` и `Parse`.
     fn details(&self, item: &MediaItem) -> impl Future<Output = Result<MediaDetails>> + Send;
 
-    /// Сезоны и серии для выбранного перевода. Может вернуть `NotFound`, `Parse`.
-    fn episodes(
-        &self,
-        id: u64,
-        translator_id: u64,
-    ) -> impl Future<Output = Result<Vec<Season>>> + Send;
+    /// Серии сериала для перевода по умолчанию. Для фильма (`seasons` пусто)
+    /// возвращается `Ok(vec![])`. Может вернуть `NotFound`, `Parse`.
+    fn episodes(&self, details: &MediaDetails)
+        -> impl Future<Output = Result<Vec<Episode>>> + Send;
 
-    /// Потоки уже после деобфускации, не сырая строка сайта. Может вернуть
-    /// `NotFound`, `Parse`, `Deobfuscation` и `AuthRequired`.
-    fn streams(&self, request: StreamRequest) -> impl Future<Output = Result<StreamSource>> + Send;
+    /// Потоки уже после деобфускации, не сырая строка сайта. Для фильма `episode`
+    /// — `None`, для сериала — выбранная серия. Может вернуть `NotFound`, `Parse`,
+    /// `Deobfuscation` и `AuthRequired`.
+    fn streams(
+        &self,
+        details: &MediaDetails,
+        episode: Option<&Episode>,
+    ) -> impl Future<Output = Result<Vec<StreamQuality>>> + Send;
 }
 
 #[cfg(test)]
@@ -90,8 +82,8 @@ mod tests {
     struct MockProvider {
         items: Vec<MediaItem>,
         details: MediaDetails,
-        seasons: Vec<Season>,
-        source: StreamSource,
+        episodes: Vec<Episode>,
+        qualities: Vec<StreamQuality>,
     }
 
     impl MockProvider {
@@ -109,26 +101,31 @@ mod tests {
                         id: 1,
                         name: "Дублированный".to_string(),
                     }],
-                    seasons: vec![Season {
+                    seasons: vec![crate::media::Season {
                         number: 1,
                         episodes: vec![1, 2],
                     }],
+                    raw_html: None,
                 },
-                seasons: vec![Season {
-                    number: 1,
-                    episodes: vec![1, 2],
+                episodes: vec![
+                    Episode {
+                        season_id: 1,
+                        episode_id: 1,
+                        title: "1 серия".to_string(),
+                    },
+                    Episode {
+                        season_id: 1,
+                        episode_id: 2,
+                        title: "2 серия".to_string(),
+                    },
+                ],
+                qualities: vec![StreamQuality {
+                    label: "720p".to_string(),
+                    url: Url::parse("https://cdn.example.com/720.mp4").unwrap(),
+                    premium: false,
+                    hls: None,
+                    fallbacks: vec![],
                 }],
-                source: StreamSource {
-                    qualities: vec![StreamQuality {
-                        label: "720p".to_string(),
-                        url: Url::parse("https://cdn.example.com/720.mp4").unwrap(),
-                        premium: false,
-                        hls: None,
-                        fallbacks: vec![],
-                    }],
-                    subtitles: vec![],
-                    default_quality: Some("720p".to_string()),
-                },
             }
         }
     }
@@ -161,17 +158,23 @@ mod tests {
             }
         }
 
-        async fn episodes(&self, id: u64, translator_id: u64) -> Result<Vec<Season>> {
-            if id == self.details.item.id && translator_id == 1 {
-                Ok(self.seasons.clone())
+        async fn episodes(&self, details: &MediaDetails) -> Result<Vec<Episode>> {
+            if details.item.id == self.details.item.id && !details.seasons.is_empty() {
+                Ok(self.episodes.clone())
+            } else if details.item.id == self.details.item.id {
+                Ok(vec![])
             } else {
                 Err(KinoError::NotFound)
             }
         }
 
-        async fn streams(&self, request: StreamRequest) -> Result<StreamSource> {
-            if request.id == self.details.item.id {
-                Ok(self.source.clone())
+        async fn streams(
+            &self,
+            details: &MediaDetails,
+            _episode: Option<&Episode>,
+        ) -> Result<Vec<StreamQuality>> {
+            if details.item.id == self.details.item.id {
+                Ok(self.qualities.clone())
             } else {
                 Err(KinoError::NotFound)
             }
@@ -226,36 +229,36 @@ mod tests {
         );
 
         assert_eq!(
-            pollster::block_on(provider.episodes(7, 1)).unwrap(),
-            provider.seasons
+            pollster::block_on(provider.episodes(&provider.details)).unwrap(),
+            provider.episodes
         );
-        assert_eq!(
-            pollster::block_on(provider.episodes(7, 2)),
-            Err(KinoError::NotFound)
-        );
-
-        let request = StreamRequest {
-            id: 7,
-            translator_id: 1,
-            season: Some(1),
-            episode: Some(2),
+        let movie_details = MediaDetails {
+            seasons: vec![],
+            ..provider.details.clone()
         };
+        assert!(pollster::block_on(provider.episodes(&movie_details))
+            .unwrap()
+            .is_empty());
+
+        let episode = provider.episodes[0].clone();
         assert_eq!(
-            pollster::block_on(provider.streams(request)).unwrap(),
-            provider.source
+            pollster::block_on(provider.streams(&provider.details, Some(&episode))).unwrap(),
+            provider.qualities
+        );
+        assert_eq!(
+            pollster::block_on(provider.streams(&provider.details, None)).unwrap(),
+            provider.qualities
         );
     }
 
     #[test]
     fn provider_futures_are_send() {
         let provider = MockProvider::new();
+        let episode = provider.episodes[0].clone();
         assert_send(&provider.search("x"));
-        assert_send(&provider.streams(StreamRequest {
-            id: 1,
-            translator_id: 1,
-            season: None,
-            episode: None,
-        }));
+        assert_send(&provider.episodes(&provider.details));
+        assert_send(&provider.streams(&provider.details, None));
+        assert_send(&provider.streams(&provider.details, Some(&episode)));
     }
 
     #[test]
@@ -267,22 +270,6 @@ mod tests {
         roundtrip(&CatalogQuery {
             kind: None,
             page: 1,
-        });
-    }
-
-    #[test]
-    fn stream_request_roundtrip() {
-        roundtrip(&StreamRequest {
-            id: 7,
-            translator_id: 1,
-            season: Some(2),
-            episode: Some(5),
-        });
-        roundtrip(&StreamRequest {
-            id: 7,
-            translator_id: 1,
-            season: None,
-            episode: None,
         });
     }
 }

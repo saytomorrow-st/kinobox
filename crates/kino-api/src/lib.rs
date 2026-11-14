@@ -1,14 +1,17 @@
 //! HTTP-клиент, зеркала, сессия и парсинг HDrezka.
 
 pub mod api;
+pub mod cdn;
 pub mod client;
 pub mod deobfuscate;
 pub mod mirrors;
 pub mod parse;
+mod provider_impl;
 pub mod sanitize;
 pub mod session;
 
 pub use api::HdrezkaApi;
+pub use cdn::{extract_player_data, parse_episodes_html, PlayerData};
 pub use client::{ClientConfig, HttpClient, Response};
 pub use deobfuscate::deobfuscate;
 pub use mirrors::{

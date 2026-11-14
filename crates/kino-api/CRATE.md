@@ -325,7 +325,8 @@ cargo run -p kino-api --example login -- [--mirror URL] [--email EMAIL] [--logou
 функций без сети; сеть — только в `HdrezkaApi`.
 
 Реэкспортировано из корня крейта: `HdrezkaApi`, `parse_cards`, `parse_details`,
-`parse_last_page`, `catalog_url`, `search_url`, `sanitize_page`, `contains_email`.
+`parse_last_page`, `catalog_url`, `search_url`, `sanitize_page`, `contains_email`,
+`extract_player_data`, `parse_episodes_html`, `PlayerData`.
 
 ```rust
 pub fn parse_cards(html: &str, base: &Url) -> Result<Vec<MediaItem>>;
@@ -348,6 +349,11 @@ impl HdrezkaApi {
     pub async fn catalog(&self, query: CatalogQuery) -> Result<Vec<MediaItem>>;
     pub async fn details(&self, item: &MediaItem) -> Result<MediaDetails>;
     pub async fn details_at(&self, page_url: &Url) -> Result<MediaDetails>; // детали по адресу
+    pub async fn episodes_list(&self, item: &MediaItem, translator_id: u32)
+        -> Result<HashMap<u32, Vec<Episode>>>;   // action=get_episodes
+    pub async fn stream_url(&self, post_id: u32, translator_id: u32,
+        season: Option<u32>, episode: Option<u32>)
+        -> Result<Vec<StreamQuality>>;           // action=get_stream, после деобфускации
 }
 ```
 
@@ -398,9 +404,72 @@ cargo run -p kino-api --example capture -- --out <каталог>
 
 ### `KinoProvider`
 
-Трейт `kino_core::KinoProvider` здесь НЕ реализован: его методы `episodes` и
-`streams` — задача #013, заглушек нет. `HdrezkaApi` покрывает пока `search`,
-`catalog` и `details` как inherent-методы.
+Трейт `kino_core::KinoProvider` реализован в `src/provider_impl.rs` для
+`HdrezkaApi` (#013). `search`/`catalog`/`details` делегируют одноимённым
+inherent-методам, `episodes` и `streams` — данным плеера и AJAX (см. ниже).
+
+### CDN и потоки (`cdn`, `api`, `provider_impl`)
+
+Чистые парсеры — в `src/cdn.rs`, сеть — в `HdrezkaApi::episodes_list` и
+`stream_url`, реализация трейта — в `src/provider_impl.rs`.
+
+#### Откуда берутся поля плеера
+
+На странице произведения скрипт содержит вызов
+`sof.tv.initCDNMoviesEvents(post_id, translator_id, …, {…})` (для сериалов
+`initCDNSeriesEvents`). Последним аргументом — JSON-объект с полем `streams`
+(строка потоков, обфусцирована) и `thumbnails` (превью, пока игнорируется).
+`extract_player_data` ищет первый такой вызов, берёт первые два числовых
+аргумента и извлекает JSON-объект по сбалансированным скобкам (JSON в поле
+`streams` содержит запятые между качествами, а поле `midroll` — фигурные скобки
+внутри строки, поэтому разбор идёт по скобкам, а не по готовому шаблону).
+
+```rust
+pub struct PlayerData { pub post_id: u32, pub translator_id: u32, pub streams: String }
+pub fn extract_player_data(html: &str) -> Result<PlayerData>;
+pub fn parse_episodes_html(html: &str, season_id: u32) -> Result<Vec<Episode>>;
+```
+
+Проверено на реальной обезличенной странице фильма `tests/fixtures/film_85038.html`
+(kvk.pub, 2026-11-14): `post_id = 85038`, `translator_id = 111`, `streams`
+начинается с `[360p]`. Разметка `initCDNSeriesEvents` на реальной странице
+сериала не проверялась — только синтетический фрагмент в тестах.
+
+#### AJAX `/ajax/get_cdn_series/`
+
+`POST /ajax/get_cdn_series/` с полями `id`, `translator_id`, `action`. Успех:
+`{"success":true,…}`, ошибка: `{"success":false,"message":"…"}`. Статус 200 с
+`success:false` — это не сетевая ошибка, а `KinoError::Parse` (текст из `message`).
+Нет `success` вообще или неожиданная структура — тоже `Parse`.
+
+- `action=get_episodes` → `{"success":true,"episodes":{"1":"<ul><li>1 серия</li>…</ul>",…}}`.
+  `episodes_list` разбирает строку каждого сезона через `parse_episodes_html` и
+  возвращает `HashMap<u32, Vec<Episode>>`; ключ — номер сезона, `episode_id` —
+  порядковый номер `<li>`, `title` — текст `<li>`. Пустой `<ul>` или его
+  отсутствие — `Ok(vec![])`.
+- `action=get_stream` → `{"success":true,"url":"#h…"}`. `stream_url` добавляет
+  `season`/`episode` в форму, только если заданы, и деобфусцирует `url`.
+
+#### Провайдер
+
+- `episodes(&MediaDetails)`: для фильма (`seasons` пусто) — `Ok(vec![])`; иначе
+  берёт перевод по умолчанию (`details.translators[0]`), вызывает `episodes_list`,
+  складывает серии всех сезонов и сортирует по `(season_id, episode_id)`.
+- `streams(&MediaDetails, Option<&Episode>)`: для фильма (`episode = None`)
+  извлекает `PlayerData` из `MediaDetails::raw_html` и деобфусцирует `streams`
+  без AJAX — данные перевода по умолчанию уже лежат на странице. Для сериала —
+  `stream_url` с `post_id`, `translator_id` и `(season_id, episode_id)` серии.
+
+Для фильма можно обойтись без AJAX, только если `"streams"` на странице непустой;
+другой перевод для фильма через AJAX в #013 не реализован (нужен `action=get_movie`
+с другим `translator_id`).
+
+Пример запуска (реальные запросы; для сериала без `--season`/`--episode`
+печатается список серий и код 2):
+
+```
+cargo run -p kino-api --example play -- <url страницы> [--translator ID] [--quality 1080p|720p|…] [--season N --episode M] [--mirror URL]
+```
 
 ## Деобфускация (`deobfuscate`)
 

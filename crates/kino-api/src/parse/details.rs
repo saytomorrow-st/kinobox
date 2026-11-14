@@ -89,6 +89,7 @@ pub fn parse_details(html: &str, page_url: &Url) -> Result<MediaDetails> {
         duration_minutes,
         translators,
         seasons,
+        raw_html: Some(html.to_string()),
     })
 }
 

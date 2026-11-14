@@ -69,3 +69,26 @@ fn login_page_is_auth_required() {
         Err(KinoError::AuthRequired)
     );
 }
+
+#[tokio::test]
+async fn film_streams_from_real_fixture() {
+    use kino_api::{ClientConfig, HdrezkaApi, HttpClient};
+    use kino_core::KinoProvider;
+
+    let details = parse_details(FILM, &page_url()).expect("детали должны разобраться");
+    let client = HttpClient::new(ClientConfig::default()).expect("клиент");
+    let api = HdrezkaApi::new(client, Url::parse("https://kvk.pub/").expect("url"));
+
+    let qualities = api
+        .streams(&details, None)
+        .await
+        .expect("потоки фильма должны разобраться");
+
+    let labels: Vec<&str> = qualities.iter().map(|q| q.label.as_str()).collect();
+    assert_eq!(labels.first().copied(), Some("360p"));
+    assert!(qualities.len() >= 4, "качества: {labels:?}");
+    assert!(qualities.iter().any(|q| q.premium), "нет премиум-качества");
+    assert!(qualities
+        .iter()
+        .all(|q| q.url.host_str() == Some("cdn.example.com")));
+}
