@@ -1263,10 +1263,16 @@ dependencies = [
 name = "kino-ipc"
 version = "0.1.0"
 dependencies = [
+ "futures-util",
  "kino-api",
  "kino-core",
  "kino-player",
  "kino-store",
+ "serde",
+ "serde_json",
+ "tokio",
+ "url",
+ "wiremock",
 ]
 
 [[package]]

@@ -11,3 +11,11 @@ kino-core.workspace = true
 kino-api.workspace = true
 kino-player.workspace = true
 kino-store.workspace = true
+serde.workspace = true
+url.workspace = true
+futures-util.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+tokio = { workspace = true, features = ["macros", "rt"] }
+wiremock.workspace = true
