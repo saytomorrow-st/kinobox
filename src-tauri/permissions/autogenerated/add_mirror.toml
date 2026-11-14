@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-add-mirror"
+description = "Enables the add_mirror command without any pre-configured scope."
+commands.allow = ["add_mirror"]
+
+[[permission]]
+identifier = "deny-add-mirror"
+description = "Denies the add_mirror command without any pre-configured scope."
+commands.deny = ["add_mirror"]

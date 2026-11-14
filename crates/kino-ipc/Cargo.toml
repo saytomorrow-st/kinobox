@@ -12,6 +12,8 @@ kino-api.workspace = true
 kino-player.workspace = true
 kino-store.workspace = true
 serde.workspace = true
+specta.workspace = true
+specta-typescript.workspace = true
 url.workspace = true
 futures-util.workspace = true
 

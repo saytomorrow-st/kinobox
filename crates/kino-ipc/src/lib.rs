@@ -12,4 +12,7 @@ mod tests;
 
 pub use dto::{BootState, MirrorDto, MirrorStateDto, UserDto};
 pub use error::{IpcError, IpcErrorKind};
+pub use kino_api::{
+    ClientConfig, KeychainSecretStore, MemoryMirrorStore, MemorySecretStore, MirrorConfig,
+};
 pub use service::AppService;

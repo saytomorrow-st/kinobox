@@ -12,8 +12,12 @@ Rust + Tauri v2 + React. Открытый исходный код, MIT.
 `KinoProvider`. Всё работает из терминала через примеры (`cargo run -p kino-api
 --example …`).
 
-Окна пока нет. UI (React + Tailwind), Tauri-оболочка, плеер `libmpv`,
-SQLite-хранилище, автообновление и focus-навигация запланированы на M2.
+**M2 (вход и оболочка) — начат.** Есть `src-tauri` (окна `login`/`main`) и
+каркас `ui` (React + Tailwind): окно входа и главный экран-заглушка. При
+первом запуске окно входа обязательно; если в Keychain уже есть данные,
+приложение входит ими молча и сразу открывает главное окно. Список зеркал
+внутри окна входа, плеер `libmpv`, SQLite-хранилище, автообновление и
+focus-навигация каталога — ещё впереди.
 Возможности из списка ниже описывают конечную цель, а не текущее состояние:
 
 - Главная: hero-карусель и ряды постеров
@@ -89,10 +93,18 @@ cargo run -p kino-api --example capture -- --out ./captured
 
 ## Сборка
 
-    cargo tauri dev      # (M2, пока недоступно)
-    cargo tauri build    # (M2, пока недоступно)
+```bash
+pnpm --dir ui install
 
-Требуется: Rust stable, Node 22, pnpm 9, Xcode CLT.
+cargo tauri dev                                      # окно разработки
+cargo tauri build --target universal-apple-darwin     # релизная сборка под x86_64 и aarch64
+```
+
+Требуется: Rust stable (≥ 1.98), Node 22, pnpm 9, Xcode CLT.
+
+При запуске приложение читает macOS Keychain (сервис `kinobox`): если данные там есть, вход
+происходит автоматически и сразу открывается главное окно. Если данных нет или сайт их отклонил,
+показывается окно входа — без входа приложением пользоваться нельзя.
 
 ## Документация
 
@@ -100,6 +112,8 @@ cargo run -p kino-api --example capture -- --out ./captured
     ARCHITECTURE.md                архитектура и дизайн-система
     crates/kino-core/CRATE.md      доменные типы, трейт провайдера
     crates/kino-api/CRATE.md       HTTP-клиент, зеркала, парсинг, деобфускация
+    crates/kino-ipc/CRATE.md       сервисный слой для окна входа (AppService, DTO)
+    src-tauri/CRATE.md             оболочка Tauri: команды, окна, жизненный цикл
     tasks/                         доска задач
     decisions/                     лог решений
 

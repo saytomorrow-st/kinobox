@@ -1,10 +1,11 @@
 # kino-ipc
 
-Сервисный слой между UI и `kino-api`: запуск, вход, выход, зеркала. Без зависимости от Tauri и specta.
-Команды `tauri::command` и `specta::Type` добавляет #015, здесь только `AppService` и DTO с `serde`.
+Сервисный слой между UI и `kino-api`: запуск, вход, выход, зеркала. Без зависимости от Tauri.
+Команды `tauri::command` добавляет `src-tauri` (#015), здесь только `AppService` и DTO с `serde` и `specta::Type`.
 
 Реэкспортировано из корня крейта: `AppService`, `BootState`, `UserDto`, `MirrorDto`, `MirrorStateDto`,
-`IpcError`, `IpcErrorKind`.
+`IpcError`, `IpcErrorKind`, `ClientConfig`, `MirrorConfig`, `KeychainSecretStore`, `MemorySecretStore`,
+`MemoryMirrorStore`.
 
 ## AppService
 
@@ -29,6 +30,8 @@ impl<S: SecretStore, M: MirrorStore> AppService<S, M> {
 
 В приложении: `AppService<KeychainSecretStore, MemoryMirrorStore>`. SQLite-стор зеркал придёт из `kino-store`,
 тогда меняется только второй параметр. В тестах: `MemorySecretStore` и `MemoryMirrorStore`.
+
+**Известное ограничение:** активное зеркало хранится в `MemoryMirrorStore` и не сохраняется между запусками приложения.
 
 Сервис хранит `HttpClient` (с cookie-хранилищем), `MirrorPool`, `SecretStore` и текущую `UserSession`.
 Сессия живёт в памяти. Куки в Keychain не пишутся.
@@ -64,10 +67,10 @@ impl<S: SecretStore, M: MirrorStore> AppService<S, M> {
 
 | Тип | Форма |
 |---|---|
-| `UserDto` | `{ userId: u64, username: string }` |
+| `UserDto` | `{ userId: number, username: string }` (userId экспортируется как `number`, точность до 2^53) |
 | `BootState` | тег `state`: `needsLogin { email: string \| null }`, `signedIn { user: UserDto }`, `unavailable { message: string }` |
 | `MirrorStateDto` | `unknown`, `open`, `needsLogin`, `challenge`, `dead` |
-| `MirrorDto` | `{ url, state, reason: string \| null, latencyMs: number \| null, active, standby }` |
+| `MirrorDto` | `{ url, state, reason: string \| null, latencyMs: number \| null, active, standby }` (latencyMs экспортируется как `number`) |
 | `IpcError` | `{ kind: IpcErrorKind, message: string }`, реализует `Display` и `std::error::Error` |
 | `IpcErrorKind` | `invalidInput`, `loginRejected`, `authRequired`, `challenge`, `network`, `keychain`, `noMirrors`, `internal` |
 
@@ -95,12 +98,16 @@ impl<S: SecretStore, M: MirrorStore> AppService<S, M> {
 4. `signedIn`: приложение открывается. `unavailable`: показывается сообщение и выбор зеркала.
 5. Выход: `logout`, затем снова окно входа.
 
-## Как #015 навесит команды
+## Интеграция с Tauri (src-tauri, #015)
 
 Один `AppService` кладётся в `tauri::State` (`Arc` не нужен: Tauri держит состояние сам, все методы принимают `&self`).
 Каждый метод становится тонкой `#[tauri::command] #[specta::specta]` функцией, например
 `async fn login(state: State<'_, Service>, email: String, password: String) -> Result<UserDto, IpcError>`.
 Типы получают `specta::Type` одним derive. `IpcError` сериализуется как есть. Логику в командах не дублировать.
+
+**Specta и u64:** поля `user_id` и `latency_ms` помечены `#[specta(type = f64)]` (или `Option<f64>`) для экспорта
+в TypeScript как `number`. ID пользователей HDrezka укладываются в JS-число (до 2^53-1), потерь точности нет.
+`latencyMs` в миллисекундах редко превысит 10000, а потери <1мс несущественны. Serde-сериализация остаётся `u64`.
 
 ## Тесты
 
