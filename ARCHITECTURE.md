@@ -178,3 +178,26 @@
 - Focus lerp-переход, не скачок.
 - Инерционное затухание горизонтального скролла по краям.
 - Модалка: постер на весь экран, затемнение, кнопка ▶, выбор качества/перевода/субтитров.
+
+## Вехи
+
+### M1 — Ядро без UI (завершено 2026-11-14)
+
+Крейты `kino-core` и `kino-api` полностью реализованы и покрыты тестами.
+Всё работает из терминала через примеры (`cargo run -p kino-api --example …`).
+
+Задачи: #001 workspace-scaffold, #002 core-types, #003 core-provider-trait,
+#004 api-http-client, #005 api-mirror-pool, #006 api-deobfuscate,
+#007 api-parsing-and-cdn, #008 api-fixtures-and-docs, #009 api-anubis-detection,
+#010 api-mirror-states, #011 api-deobfuscate-real-format, #012 api-session-login,
+#013 api-streams-episodes.
+
+Включено: HTTP-клиент с retry/backoff/Challenge-детекцией, пул зеркал с
+health-check и standby, вход через macOS Keychain, парсинг деталей/каталога/поиска,
+деобфускация потоков (новый формат и обфусцированный `#h`), AJAX `get_episodes`
+и `get_stream`, трейт `KinoProvider`, обезличивание страниц (`sanitize_page`),
+одна реальная обезличенная фикстура (страница фильма).
+
+Не включено (план M2): Tauri-оболочка, React UI, плеер `libmpv`, SQLite-хранилище
+(`kino-store`), IPC (`kino-ipc`), автообновление, Anubis PoW, выбор перевода для
+фильма через AJAX.

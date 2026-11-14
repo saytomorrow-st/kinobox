@@ -32,7 +32,7 @@ let reply = client.post_form(&url, &[("q", "кино")]).await?;
 - `post_form_with_headers(&Url, form, headers: &[(&str, &str)]) -> Result<Response>`: то же с дополнительными заголовками запроса (имя, значение). Retry и определение `Challenge` те же.
 - `config() -> &ClientConfig`
 - Клиент дёшево клонируется, клоны делят пул соединений и cookie-хранилище.
-- Cookie-хранилище включено и общее для всех запросов клиента (для сессии в M2).
+- Cookie-хранилище включено и общее для всех запросов клиента (в нём живёт сессия после входа).
 - Базовый URL в клиент не зашит: методы принимают полный `url::Url` (его выдаёт `MirrorPool`, #005).
 
 ### Response
@@ -210,8 +210,8 @@ if mirror.state == MirrorState::NeedsLogin {
 
 ### Standby
 
-Сейчас `standby-rezka.tv` отдаёт форму входа без редиректа. Принимает ли он вход напрямую, не проверено
-(выяснится в #012), поэтому без редиректа он **не зеркало**. `probe_standby` в этом случае возвращает
+Сейчас `standby-rezka.tv` отдаёт форму входа без редиректа. Принимает ли он вход напрямую, на живом
+сайте не проверено, поэтому без редиректа он **не зеркало**. `probe_standby` в этом случае возвращает
 `state = NeedsLogin` (так выглядит его ответ) и `reason = "standby без редиректа на зеркало"`, а `resolve`
 его не использует. Для статусов без редиректа с другим состоянием (`Dead`, `Challenge`) к причине
 добавляется исходная в скобках.
@@ -461,7 +461,7 @@ pub fn parse_episodes_html(html: &str, season_id: u32) -> Result<Vec<Episode>>;
   `stream_url` с `post_id`, `translator_id` и `(season_id, episode_id)` серии.
 
 Для фильма можно обойтись без AJAX, только если `"streams"` на странице непустой;
-другой перевод для фильма через AJAX в #013 не реализован (нужен `action=get_movie`
+другой перевод для фильма через AJAX не реализован (нужен `action=get_movie`
 с другим `translator_id`).
 
 Пример запуска (реальные запросы; для сериала без `--season`/`--episode`
@@ -570,6 +570,47 @@ cargo test -p kino-api
 входа → `AuthRequired`. Для `sanitize`: каждое перечисленное поле заменяется,
 структура HTML сохраняется, `contains_email` отличает реальную почту от
 заглушки `user@example.com`.
+
+## Примеры
+
+| Пример | Команда | Назначение |
+|---|---|---|
+| `mirrors` | `cargo run -p kino-api --example mirrors -- [--known URL]... [--manual URL]` | Health-check зеркал, выбор активного |
+| `login` | `cargo run -p kino-api --example login -- [--mirror URL] [--email EMAIL] [--logout]` | Вход в аккаунт, сохранение в Keychain |
+| `cli` | `cargo run -p kino-api --example cli -- search\|details\|catalog` | Поиск, каталог, детали страницы |
+| `play` | `cargo run -p kino-api --example play -- <url> [--translator ID] [--quality …] [--season N --episode M]` | Резолв потоков (MP4/HLS) по странице |
+| `capture` | `cargo run -p kino-api --example capture -- --out <dir>` | Сбор обезличенных страниц-фикстур |
+| `fetch` | `cargo run -p kino-api --example fetch -- <url>` | Сырой GET: статус, попытки, первые 200 символов тела |
+| `deobfuscate` | `cargo run -p kino-api --example deobfuscate -- '<строка>'` | Разбор строки потоков (без сети); без аргумента — встроенная демо |
+
+## Ограничения
+
+- **(а)** Защита Anubis (проверка браузера, PoW) не обходится. Если зеркало
+  отдаёт челлендж, оно пропускается; нужно другое зеркало или `--mirror`.
+- **(б)** Формат страниц сериалов, каталога и поиска проверен не на реальных
+  страницах, а по описанию и синтетическим фрагментам. Реальный формат
+  сверяется после запуска `capture`.
+- **(в)** Вход и Keychain проверены автоматически только на заглушках
+  (`wiremock`, `MemorySecretStore`). Живой вход проверяет заказчик.
+- **(г)** Перевод по умолчанию — первый в списке (`details.translators[0]`).
+  Выбор перевода для фильма через AJAX (`action=get_movie` с другим
+  `translator_id`) не реализован.
+
+## Что проверено на реальной странице и что нет
+
+**Проверено на реальной обезличенной фикстуре** (`tests/fixtures/film_85038.html`,
+kvk.pub, 2026-11-14): парсер деталей фильма (`parse_details`), извлечение данных
+плеера (`extract_player_data`), формат строки `streams` без префикса `#h`,
+деобфускация обоих форматов, маркеры страницы входа и Anubis.
+
+**Проверено вручную 2026-11-14:** `POST /ajax/login/` (успех + куки), формат
+ответа `get_cdn_series`, состояния зеркал по IP.
+
+**НЕ проверено на реальных страницах:** парсинг каталога и поиска (селекторы
+`div.b-content__inline_item` и вложенные — из исходников двух MIT-библиотек),
+разметка `initCDNSeriesEvents` на странице сериала, сезоны/серии
+(`li.b-simple_season__item`, `li.b-simple_episode__item`), пути разделов
+`series`/`animation`. Всё это покрыто только синтетическими тестами.
 
 ## Сборка
 
