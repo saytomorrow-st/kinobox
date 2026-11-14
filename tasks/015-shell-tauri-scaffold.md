@@ -49,3 +49,9 @@ created: 2026-11-14
   (GitHub Actions, macOS runner), чтобы не грузить слабый ноутбук заказчика (i3-1000G4) длительной сборкой.
 - Живая проверка (`cargo tauri dev`, собранный `.app`) не делалась и не будет: читает реальный Keychain
   и логинится на живом HDrezka. Проверяет сам заказчик.
+- CI на PR #17 (GitHub Actions, macOS runner): все три job зелёные — `rust` (fmt, clippy, test,
+  обе архитектуры aarch64+x86_64, 9м15с), `bindings` (генерация и детерминированность, 4м41с),
+  `ui` (typecheck/test/build, 22с). Это закрывает `x86_64-apple-darwin`, который локально не прогонялся.
+- `cargo tauri build --target universal-apple-darwin` (через `build-dev.yml`) пока не запущен:
+  `workflow_dispatch` регистрируется в GitHub Actions только для воркфлоу, уже попавшего в `main`,
+  а цепочка PR #1–#17 ещё не смержена. Запустить вручную после мержа.
