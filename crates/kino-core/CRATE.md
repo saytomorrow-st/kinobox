@@ -20,11 +20,22 @@
 
 | Тип | Поля |
 |---|---|
-| `StreamQuality` | `label: String` (`"360p"`, `"720p"`), `url: Url` |
+| `StreamQuality` | `label: String`, `url: Url`, `premium: bool`, `hls: Option<Url>`, `fallbacks: Vec<Url>` |
 | `SubtitleTrack` | `lang: String`, `label: String`, `url: Url`, `is_default: bool` |
 | `StreamSource` | `qualities: Vec<StreamQuality>`, `subtitles: Vec<SubtitleTrack>`, `default_quality: Option<String>` |
 
 `SubtitleTrack::lang` — код или метка языка как пришла с сайта.
+
+`StreamQuality` (поля `premium`, `hls`, `fallbacks` помечены `#[serde(default)]`,
+поэтому старые данные с только `label` и `url` десериализуются):
+
+- `url` — основной прямой mp4. Если прямых адресов нет, но есть HLS, сюда
+  кладётся адрес HLS без суффикса `:hls:manifest.m3u8` (допущение `kino-api`).
+- `premium` — признак премиум-качества (метка сайта содержала класс
+  `pjs-prem-quality`).
+- `hls` — первый HLS-манифест (`...:hls:manifest.m3u8`), если качество его
+  предоставляет; прочие HLS игнорируются.
+- `fallbacks` — резервные прямые mp4 после основного `url`, в исходном порядке.
 
 ## Пользователь (`user`)
 
