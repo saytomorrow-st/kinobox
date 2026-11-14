@@ -11,6 +11,10 @@ function fakeApi(overrides: Partial<Api> = {}): Api {
     login: async () => ({ ok: true, value: user }),
     logout: async () => ({ ok: true, value: null }),
     session: async () => user,
+    mirrors: async () => ({ ok: true, value: [] }),
+    checkMirrors: async () => ({ ok: true, value: [] }),
+    addMirror: async () => ({ ok: false, error: { kind: "internal", message: "не вызывается" } }),
+    selectMirror: async () => ({ ok: false, error: { kind: "internal", message: "не вызывается" } }),
     quit: async () => {},
     ...overrides,
   };
