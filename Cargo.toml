@@ -27,6 +27,7 @@ wiremock = "=0.6.5"
 futures-util = { version = "=0.3.34", default-features = false, features = ["alloc"] }
 keyring = "=4.2.0"
 rpassword = "=7.5.5"
+scraper = { version = "=0.29.0", default-features = false }
 
 kino-core = { path = "crates/kino-core" }
 kino-api = { path = "crates/kino-api" }
