@@ -122,6 +122,9 @@ mod tests {
                     qualities: vec![StreamQuality {
                         label: "720p".to_string(),
                         url: Url::parse("https://cdn.example.com/720.mp4").unwrap(),
+                        premium: false,
+                        hls: None,
+                        fallbacks: vec![],
                     }],
                     subtitles: vec![],
                     default_quality: Some("720p".to_string()),
