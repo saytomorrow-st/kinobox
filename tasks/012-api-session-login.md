@@ -1,7 +1,7 @@
 ---
 id: 012
 type: feature
-status: open
+status: review
 model: claude-sonnet-5
 crate: kino-api
 created: 2026-11-14
@@ -30,3 +30,14 @@ created: 2026-11-14
 ## Заметки
 
 Зависит от #010. Правило в `AGENTS.md` «только публичные страницы сайта» этой задачей нарушается: каталог доступен только после входа. Правку `AGENTS.md` выполняю только с согласия заказчика.
+
+2026-11-14: вход и хранение данных готовы. 113 тестов `kino-api` и 23 `kino-core`, `fmt`/`clippy`/обе архитектуры зелёные. Живой вход и реальный Keychain НЕ проверялись: у агентов нет учётных данных, тесты идут через wiremock и `MemorySecretStore`.
+- `login`, `ensure_logged_in`, `login_and_remember`; `SecretStore` с `KeychainSecretStore` и `MemorySecretStore`; `Password` с закрытым `Debug`, без `Display` и `Serialize`.
+- Keychain: сервис `kinobox`, аккаунт `hdrezka-credentials`, значение JSON `{email, password}`. В Keychain данные пишутся только после успешного входа, неверный пароль туда не попадает. Куки в Keychain не пишутся.
+- `kino-core::KinoError` получил `LoginRejected(String)` и `Keychain(String)`, оба не повторяются. `CRATE.md` обновлён.
+- Пароль вырезается из текста причины отказа на случай, если сервер вернёт его в `message`.
+- Зависимости: `keyring =4.2.0`, `rpassword =7.5.5` (только dev, для примера), у `tokio` добавлена feature `rt`.
+- Не проверено живьём: форма ответа при ошибке (разбор по JS страницы входа), наличие `input#name` на главной, реальный Keychain, интерактивный скрытый ввод, принимает ли `standby-rezka.tv` вход напрямую.
+- Ручная проверка заказчиком: `cargo run -p kino-api --example login`. Первый запуск спросит email и пароль, дальше данные берутся из Keychain, `--logout` их удаляет.
+- В `ARCHITECTURE.md` уточнено, что хранится в Keychain и что в памяти.
+- PR поверх ветки #011 (PR #10).

@@ -25,6 +25,12 @@ pub enum KinoError {
     Challenge,
     #[error("не найдено")]
     NotFound,
+    /// Сайт отклонил вход; строка — очищенная от HTML причина без пароля.
+    #[error("сайт отклонил вход: {0}")]
+    LoginRejected(String),
+    /// Сбой системного хранилища секретов (macOS Keychain); строка — описание без секретов.
+    #[error("ошибка Keychain: {0}")]
+    Keychain(String),
 }
 
 impl KinoError {
@@ -38,7 +44,9 @@ impl KinoError {
             | KinoError::AllMirrorsUnavailable
             | KinoError::AuthRequired
             | KinoError::Challenge
-            | KinoError::NotFound => false,
+            | KinoError::NotFound
+            | KinoError::LoginRejected(_)
+            | KinoError::Keychain(_) => false,
         }
     }
 }
@@ -71,6 +79,8 @@ mod tests {
             KinoError::AuthRequired,
             KinoError::Challenge,
             KinoError::NotFound,
+            KinoError::LoginRejected("x".to_string()),
+            KinoError::Keychain("x".to_string()),
         ] {
             assert!(!err.is_retryable(), "{err:?}");
         }
@@ -87,6 +97,8 @@ mod tests {
             KinoError::AuthRequired,
             KinoError::Challenge,
             KinoError::NotFound,
+            KinoError::LoginRejected("x".to_string()),
+            KinoError::Keychain("x".to_string()),
         ] {
             assert!(!err.to_string().is_empty(), "{err:?}");
         }
@@ -95,5 +107,30 @@ mod tests {
     #[test]
     fn http_display_contains_status() {
         assert!(KinoError::Http { status: 503 }.to_string().contains("503"));
+    }
+
+    #[test]
+    fn login_rejected_display_is_prefix_plus_reason_only() {
+        let err = KinoError::LoginRejected("неверный пароль".to_string());
+        assert_eq!(err.to_string(), "сайт отклонил вход: неверный пароль");
+    }
+
+    #[test]
+    fn keychain_display_is_prefix_plus_reason_only() {
+        let err = KinoError::Keychain("нет доступа".to_string());
+        assert_eq!(err.to_string(), "ошибка Keychain: нет доступа");
+    }
+
+    #[test]
+    fn auth_errors_do_not_add_hidden_details() {
+        let secret = "Zq9!pass-secret";
+        for err in [
+            KinoError::AuthRequired,
+            KinoError::LoginRejected("причина".to_string()),
+            KinoError::Keychain("запись повреждена".to_string()),
+        ] {
+            assert!(!err.to_string().contains(secret), "{err}");
+            assert!(!format!("{err:?}").contains(secret), "{err:?}");
+        }
     }
 }
