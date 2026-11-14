@@ -1,0 +1,18 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Команды приложения для окон входа и главного окна. Из системных прав только перетаскивание своего окна за заголовок.",
+  "windows": ["login", "main"],
+  "permissions": [
+    "allow-boot",
+    "allow-login",
+    "allow-logout",
+    "allow-session",
+    "allow-mirrors",
+    "allow-check-mirrors",
+    "allow-add-mirror",
+    "allow-select-mirror",
+    "allow-quit",
+    "core:window:allow-start-dragging"
+  ]
+}

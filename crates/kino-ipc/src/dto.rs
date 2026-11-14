@@ -5,13 +5,16 @@ use std::time::Duration;
 use kino_api::{MirrorState, MirrorStatus, ResolvedMirror};
 use kino_core::UserSession;
 use serde::{Deserialize, Serialize};
+use specta::Type;
+use specta_typescript::Number;
 use url::Url;
 
 const NEEDS_LOGIN_REASON: &str = "требуется вход";
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct UserDto {
+    #[specta(type = Number)]
     pub user_id: u64,
     pub username: String,
 }
@@ -26,7 +29,7 @@ impl From<&UserSession> for UserDto {
 }
 
 /// Состояние при запуске: что показать пользователю первым.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(tag = "state", rename_all = "camelCase")]
 pub enum BootState {
     /// Нужен экран входа; `email` — сохранённый адрес, если сайт отклонил вход.
@@ -42,7 +45,7 @@ pub enum BootState {
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub enum MirrorStateDto {
     Unknown,
@@ -63,12 +66,13 @@ impl From<MirrorState> for MirrorStateDto {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct MirrorDto {
     pub url: String,
     pub state: MirrorStateDto,
     pub reason: Option<String>,
+    #[specta(type = Option<Number>)]
     pub latency_ms: Option<u64>,
     pub active: bool,
     /// Запись получена пробой standby-адреса, а не из списка известных зеркал.

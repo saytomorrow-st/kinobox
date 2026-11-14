@@ -1,0 +1,68 @@
+name: Build dev app
+
+# Ручная сборка universal .app для проверки без тега релиза. Запускается из вкладки
+# Actions кнопкой "Run workflow". Приложение не публикуется — только скачивается
+# как артефакт на 14 дней. Собранный .app CI никогда не запускает (нет GUI, нет
+# Keychain CI-машины с настоящими данными) — безопасность проверяет тот, кто скачал.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Ветка или тег для сборки"
+        required: false
+        default: ""
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 9
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-apple-darwin,aarch64-apple-darwin
+
+      - name: Setup Go (wreq/BoringSSL build)
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-build-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install UI dependencies
+        run: pnpm --dir ui install --frozen-lockfile
+
+      - name: Install tauri-cli
+        run: cargo install tauri-cli --version "^2.0" --locked
+
+      - name: Build universal .app
+        run: cargo tauri build --debug --target universal-apple-darwin --bundles app
+        working-directory: src-tauri
+
+      - name: Upload .app
+        uses: actions/upload-artifact@v4
+        with:
+          name: KinoBox-debug-universal
+          path: src-tauri/target/universal-apple-darwin/debug/bundle/macos/KinoBox.app
+          retention-days: 14

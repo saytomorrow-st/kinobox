@@ -19,11 +19,15 @@
     kino-api      HTTP-клиент, зеркала, сессия, парсинг, деобфускация.
     kino-player   libmpv: воспроизведение, качество, субтитры, события прогресса.
     kino-store    SQLite, миграции, кэш просмотренного и избранного.
-    kino-ipc      типизированные Tauri-команды (tauri-specta) — мост Rust <-> TS.
+    kino-ipc      сервисный слой (AppService, DTO) + специфичные для Tauri типы (specta::Type).
+    src-tauri     оболочка Tauri: окна, регистрация команд kino-ipc, привязки TypeScript.
+    ui            React 18 + TypeScript + Zustand + Tailwind, один бандл на оба окна.
 
 Правило зависимостей: `kino-core` не знает ни о ком другом крейте.
 `kino-api`, `kino-player`, `kino-store` зависят только от `kino-core`.
-`kino-ipc` — единственная точка сборки зависимостей.
+`kino-ipc` — единственная точка сборки зависимостей ядра.
+`src-tauri` зависит только от `kino-ipc` (прямых зависимостей от `kino-api`/`kino-core` нет).
+`ui` не знает о Tauri напрямую — только через `ui/src/bindings.ts` (сгенерированный) и `ui/src/api.ts`.
 
 ## Поток данных
 
@@ -75,8 +79,25 @@
 
 ### kino-ipc
     src/lib.rs
-    src/commands/       по одному модулю на домен
-    src/specta.rs       сборка типов
+    src/service.rs      AppService: конструктор, session()
+    src/session.rs      boot, login, logout
+    src/mirrors.rs       mirrors, check_mirrors, add_mirror, select_mirror
+    src/dto.rs           DTO (serde + specta::Type)
+    src/error.rs         IpcError, IpcErrorKind
+
+### src-tauri (пакет kinobox-app, бинарь KinoBox)
+    src/lib.rs          сборка бандла команд (tauri-specta), экспорт bindings.ts
+    src/main.rs         точка входа
+    src/commands.rs     tauri::command — тонкие обёртки над AppService
+    src/state.rs        AppService<KeychainSecretStore, MemoryMirrorStore> в tauri::State
+    src/windows.rs       открытие/закрытие окон login/main
+
+### ui
+    src/App.tsx         выбор экрана по getCurrentWindow().label
+    src/screens/        LoginScreen.tsx, MainScreen.tsx
+    src/store.ts, src/session-store.ts   Zustand-стор сессии, без пароля
+    src/api.ts          единственное место, где UI знает о Tauri
+    src/bindings.ts     сгенерировано tauri-specta, не редактировать руками
 
 ## API HDrezka — используемое
 
@@ -157,6 +178,19 @@
 - Email и пароль хранятся только в macOS Keychain (сервис `kinobox`) и записываются туда после успешного входа. Куки `dle_user_id`, `dle_password`, `PHPSESSID` живут в памяти HTTP-клиента, на диск не пишутся. После перезапуска или смены зеркала вход повторяется сохранёнными данными. В логах, в `Debug` и в аргументах командной строки пароля нет. Пароль вводится скрыто в терминале или на экране входа.
 - `UserSession` в `kino-core` пароля не содержит.
 
+### Окна
+
+Окнами (`login`, `main`) управляет Rust (`src-tauri/src/windows.rs`), а не фронтенд: это гарантирует, что
+открытых окон не бывает нуль. `boot`/`login`, получив успешный вход, сначала создают/показывают `main` и
+только потом закрывают `login`. `logout` делает обратное. Закрытие окна `login` крестиком до успешного
+входа завершает приложение (`app.exit`) — вход обязателен с первого запуска. Окно входа создаётся скрытым
+(`visible: false` в `tauri.conf.json`) и показывается только когда `boot` не привёл к тихому входу
+(`NeedsLogin`/`Unavailable`), чтобы не мигать при автоматическом входе сохранёнными данными.
+
+Окно входа использует прозрачность и vibrancy (`windowEffects`, macOS `NSVisualEffectView`) в стиле диалога
+«Требуется вход» Apple TV — для этого включён `macOSPrivateApi` в `tauri.conf.json`. Осознанное решение: это
+исключает публикацию в Mac App Store, но не мешает распространению через GitHub Releases.
+
 ## Дизайн-система
 
     Фон:              #000000
@@ -201,3 +235,13 @@ health-check и standby, вход через macOS Keychain, парсинг де
 Не включено (план M2): Tauri-оболочка, React UI, плеер `libmpv`, SQLite-хранилище
 (`kino-store`), IPC (`kino-ipc`), автообновление, Anubis PoW, выбор перевода для
 фильма через AJAX.
+
+### M2 — Вход и оболочка (в работе)
+
+Задачи: #014 `kino-ipc` сервисный слой (сессия, зеркала), #015 оболочка Tauri и каркас UI,
+#016 окно входа в стиле Apple TV со списком зеркал.
+
+#014 и #015 реализованы: `AppService` с `boot`/`login`/`logout`/зеркалами, окна `login`/`main`
+с привязками TypeScript (`tauri-specta`), минимальные capabilities, строгий CSP. Активное зеркало
+пока не сохраняется между запусками (`MemoryMirrorStore`, SQLite-стор из `kino-store` придёт позже).
+#016 (красивое окно и список зеркал внутри него) — следующий шаг.
