@@ -17,6 +17,13 @@ const CHALLENGE_MARKERS: [&str; 3] = [
     "making sure you're not a bot",
     "making sure you\u{2019}re not a bot",
 ];
+const ANUBIS_COOKIE_PREFIX: &str = "techaro.lol-anubis";
+const CHALLENGE_TITLES: [&str; 3] = [
+    "проверяем, что вы не бот",
+    "making sure you're not a bot",
+    "making sure you\u{2019}re not a bot",
+];
+const TITLE_SCAN_LIMIT: usize = 64 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClientConfig {
@@ -178,11 +185,11 @@ impl HttpClient {
             final_url,
         };
 
-        if status < 400 {
-            return Ok(result);
-        }
         if looks_like_challenge(&result) {
             return Err(KinoError::Challenge.into());
+        }
+        if status < 400 {
+            return Ok(result);
         }
         let retry_after = (status == 429)
             .then(|| parse_retry_after(&result))
@@ -204,7 +211,12 @@ fn map_transport_error(err: wreq::Error) -> Failure {
     KinoError::Network(message).into()
 }
 
+/// Anubis отвечает и 200, и 403/503, поэтому куки и `<title>` проверяются при любом статусе,
+/// а широкий поиск маркеров — только при 403 и 503.
 fn looks_like_challenge(response: &Response) -> bool {
+    if has_anubis_cookie(&response.headers) || title_is_challenge(&response.body) {
+        return true;
+    }
     if !matches!(response.status, 403 | 503) {
         return false;
     }
@@ -219,6 +231,56 @@ fn looks_like_challenge(response: &Response) -> bool {
         .iter()
         .any(|(name, value)| contains_marker(name) || contains_marker(value))
         || contains_marker(&response.text())
+}
+
+/// Есть ли среди заголовков `Set-Cookie` кука, имя которой начинается с `techaro.lol-anubis`.
+fn has_anubis_cookie(headers: &[(String, String)]) -> bool {
+    headers
+        .iter()
+        .filter(|(name, _)| name.eq_ignore_ascii_case("set-cookie"))
+        .filter_map(|(_, value)| cookie_name(value))
+        .any(|name| starts_with_ignore_ascii_case(name, ANUBIS_COOKIE_PREFIX))
+}
+
+/// Имя куки из значения `Set-Cookie`: всё до первого `=`.
+fn cookie_name(set_cookie: &str) -> Option<&str> {
+    let (name, _) = set_cookie.split_once('=')?;
+    Some(name.trim())
+}
+
+fn starts_with_ignore_ascii_case(text: &str, prefix: &str) -> bool {
+    text.get(..prefix.len())
+        .is_some_and(|head| head.eq_ignore_ascii_case(prefix))
+}
+
+/// Содержит ли какой-либо элемент `<title>` в начале тела фразу страницы-челленджа.
+fn title_is_challenge(body: &[u8]) -> bool {
+    let head = body.get(..TITLE_SCAN_LIMIT).unwrap_or(body);
+    let lower = String::from_utf8_lossy(head).to_lowercase();
+    let mut rest = lower.as_str();
+    while let Some(open) = rest.find("<title") {
+        let Some(after_open) = rest.get(open..) else {
+            return false;
+        };
+        let Some(tag_end) = after_open.find('>') else {
+            return false;
+        };
+        let Some(content) = after_open.get(tag_end + 1..) else {
+            return false;
+        };
+        let (title, next) = match content.find("</title") {
+            Some(close) => (
+                content.get(..close).unwrap_or_default(),
+                content.get(close..).unwrap_or_default(),
+            ),
+            None => (content, ""),
+        };
+        if CHALLENGE_TITLES.iter().any(|phrase| title.contains(phrase)) {
+            return true;
+        }
+        rest = next;
+    }
+    false
 }
 
 fn parse_retry_after(response: &Response) -> Option<Duration> {
@@ -402,6 +464,242 @@ mod tests {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .respond_with(ResponseTemplate::new(503).set_body_string("protected by ANUBIS"))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let err = client(test_config())
+            .get(&url(&server, "/"))
+            .await
+            .expect_err("ожидали ошибку");
+        assert_eq!(err, KinoError::Challenge);
+    }
+
+    /// gzip без сжатия (один stored-блок deflate), чтобы не тянуть зависимость ради теста.
+    fn gzip_stored(data: &[u8]) -> Vec<u8> {
+        let mut crc = u32::MAX;
+        for &byte in data {
+            crc ^= u32::from(byte);
+            for _ in 0..8 {
+                crc = if crc & 1 == 1 {
+                    (crc >> 1) ^ 0xEDB8_8320
+                } else {
+                    crc >> 1
+                };
+            }
+        }
+        let len = u16::try_from(data.len()).expect("тестовые данные короче 64 КиБ");
+        let mut out = vec![0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 0xff, 1];
+        out.extend_from_slice(&len.to_le_bytes());
+        out.extend_from_slice(&(!len).to_le_bytes());
+        out.extend_from_slice(data);
+        out.extend_from_slice(&(!crc).to_le_bytes());
+        out.extend_from_slice(&u32::from(len).to_le_bytes());
+        out
+    }
+
+    fn header_pair(name: &str, value: &str) -> (String, String) {
+        (name.to_string(), value.to_string())
+    }
+
+    #[test]
+    fn cookie_name_is_taken_before_first_equals() {
+        assert_eq!(
+            cookie_name("techaro.lol-anubis-auth-d82da6a5=; Path=/"),
+            Some("techaro.lol-anubis-auth-d82da6a5")
+        );
+        assert_eq!(cookie_name(" sid =abc"), Some("sid"));
+        assert_eq!(cookie_name("no-equals"), None);
+    }
+
+    #[test]
+    fn anubis_cookie_is_detected_among_several_set_cookie_headers() {
+        let headers = vec![
+            header_pair("set-cookie", "sid=abc; Path=/"),
+            header_pair(
+                "set-cookie",
+                "techaro.lol-anubis-cookie-verification-d82da6a5=1b2c; Path=/",
+            ),
+        ];
+        assert!(has_anubis_cookie(&headers));
+    }
+
+    #[test]
+    fn anubis_cookie_requires_name_prefix_in_set_cookie() {
+        let by_value = vec![header_pair("set-cookie", "sid=techaro.lol-anubis-auth")];
+        assert!(!has_anubis_cookie(&by_value));
+        let other_header = vec![header_pair("x-note", "techaro.lol-anubis-auth=1")];
+        assert!(!has_anubis_cookie(&other_header));
+        let suffix = vec![header_pair("set-cookie", "x-techaro.lol-anubis=1")];
+        assert!(!has_anubis_cookie(&suffix));
+    }
+
+    #[test]
+    fn anubis_cookie_comparison_ignores_case() {
+        let headers = vec![header_pair(
+            "Set-Cookie",
+            "TECHARO.lol-Anubis-Auth-AB12=; Path=/",
+        )];
+        assert!(has_anubis_cookie(&headers));
+    }
+
+    #[test]
+    fn starts_with_ignore_ascii_case_handles_short_and_multibyte_text() {
+        assert!(starts_with_ignore_ascii_case("Techaro.lol", "techaro"));
+        assert!(!starts_with_ignore_ascii_case("tech", "techaro"));
+        assert!(!starts_with_ignore_ascii_case("пример", "techaro"));
+    }
+
+    #[test]
+    fn title_detects_russian_and_english_challenge() {
+        assert!(title_is_challenge(
+            "<html><head><title>Проверяем, что вы не бот!</title></head></html>".as_bytes()
+        ));
+        assert!(title_is_challenge(
+            b"<TITLE>Making sure you're not a bot!</TITLE>"
+        ));
+        assert!(title_is_challenge(
+            "<title>Making sure you\u{2019}re not a bot!</title>".as_bytes()
+        ));
+        assert!(title_is_challenge(
+            b"<title lang=\"en\">MAKING SURE YOU'RE NOT A BOT</title>"
+        ));
+    }
+
+    #[test]
+    fn title_ignores_phrase_outside_title_and_ordinary_titles() {
+        assert!(!title_is_challenge(
+            b"<title>Home</title><p>Making sure you're not a bot</p>"
+        ));
+        assert!(!title_is_challenge(
+            "<title>Вход на HDrezka</title>".as_bytes()
+        ));
+        assert!(!title_is_challenge(b"<p>Anubis</p>"));
+        assert!(!title_is_challenge(b""));
+        assert!(!title_is_challenge(b"<title"));
+    }
+
+    #[test]
+    fn title_finds_challenge_in_second_title_element() {
+        assert!(title_is_challenge(
+            b"<svg><title>logo</title></svg><title>Making sure you're not a bot!</title>"
+        ));
+    }
+
+    #[test]
+    fn title_survives_invalid_utf8_and_unclosed_tag() {
+        let mut body = b"<title>Making sure you're not a bot".to_vec();
+        body.extend_from_slice(&[0xff, 0xfe]);
+        assert!(title_is_challenge(&body));
+        assert!(!title_is_challenge(&[0xff, 0xfe, b'<', b't']));
+    }
+
+    #[tokio::test]
+    async fn anubis_cookie_on_200_is_challenge_without_retry() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("Set-Cookie", "techaro.lol-anubis-auth-d82da6a5=; Path=/")
+                    .set_body_string("<html><body>что угодно</body></html>"),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let err = client(test_config())
+            .get(&url(&server, "/"))
+            .await
+            .expect_err("ожидали ошибку");
+        assert_eq!(err, KinoError::Challenge);
+    }
+
+    #[tokio::test]
+    async fn russian_title_on_200_is_challenge() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string("<html><title>Проверяем, что вы не бот!</title></html>"),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let err = client(test_config())
+            .get(&url(&server, "/"))
+            .await
+            .expect_err("ожидали ошибку");
+        assert_eq!(err, KinoError::Challenge);
+    }
+
+    #[tokio::test]
+    async fn english_title_on_200_is_challenge() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string("<html><title>Making sure you're not a bot!</title></html>"),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let err = client(test_config())
+            .get(&url(&server, "/"))
+            .await
+            .expect_err("ожидали ошибку");
+        assert_eq!(err, KinoError::Challenge);
+    }
+
+    #[tokio::test]
+    async fn anubis_word_in_ordinary_200_body_is_not_challenge() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(
+                "<html><title>Фильм</title><body><h1>Anubis: Страж</h1></body></html>",
+            ))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let response = client(test_config())
+            .get(&url(&server, "/"))
+            .await
+            .expect("обычная страница не челлендж");
+        assert_eq!(response.status, 200);
+    }
+
+    #[tokio::test]
+    async fn login_page_title_on_200_is_not_challenge() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string("<html><title>Вход на HDrezka</title></html>"),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let response = client(test_config())
+            .get(&url(&server, "/"))
+            .await
+            .expect("страница входа не челлендж");
+        assert_eq!(response.status, 200);
+    }
+
+    #[tokio::test]
+    async fn gzip_body_is_decoded_before_detection() {
+        let compressed = gzip_stored("<title>Проверяем, что вы не бот!</title>".as_bytes());
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("Content-Encoding", "gzip")
+                    .set_body_bytes(compressed),
+            )
             .expect(1)
             .mount(&server)
             .await;
