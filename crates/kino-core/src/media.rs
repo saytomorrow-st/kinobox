@@ -37,6 +37,11 @@ pub struct MediaDetails {
     pub translators: Vec<Translator>,
     /// Пусто для фильмов; у сериалов — сезоны с номерами серий.
     pub seasons: Vec<Season>,
+    /// Сырой HTML страницы деталей. Нужен для извлечения данных плеера
+    /// (`initCDN...Events`) при запросе потоков фильма. В сеть не сериализуется:
+    /// это кэш, а не данные.
+    #[serde(skip)]
+    pub raw_html: Option<String>,
 }
 
 /// Перевод (озвучка), доступный для произведения.
@@ -50,6 +55,18 @@ pub struct Translator {
 pub struct Season {
     pub number: u16,
     pub episodes: Vec<u16>,
+}
+
+/// Одна серия сериала, полученная из `action=get_episodes` (`/ajax/get_cdn_series/`).
+///
+/// В отличие от [`Season`] (список номеров серий со страницы деталей), `Episode`
+/// несёт заголовок серии из `<li>`-разметки и идентифицируется парой
+/// `(season_id, episode_id)`. Используется `KinoProvider::episodes`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct Episode {
+    pub season_id: u32,
+    pub episode_id: u32,
+    pub title: String,
 }
 
 #[cfg(test)]
@@ -126,6 +143,15 @@ mod tests {
     }
 
     #[test]
+    fn episode_roundtrip() {
+        roundtrip(&Episode {
+            season_id: 1,
+            episode_id: 3,
+            title: "3 серия".to_string(),
+        });
+    }
+
+    #[test]
     fn media_details_roundtrip() {
         roundtrip(&MediaDetails {
             item: sample_item(),
@@ -138,6 +164,7 @@ mod tests {
                 name: "Дублированный".to_string(),
             }],
             seasons: vec![],
+            raw_html: None,
         });
 
         roundtrip(&MediaDetails {
@@ -154,6 +181,28 @@ mod tests {
                 number: 1,
                 episodes: vec![1, 2],
             }],
+            raw_html: None,
         });
+    }
+
+    #[test]
+    fn media_details_raw_html_is_skipped_in_serde() {
+        let details = MediaDetails {
+            item: sample_item(),
+            description: None,
+            genres: vec![],
+            countries: vec![],
+            duration_minutes: None,
+            translators: vec![],
+            seasons: vec![],
+            raw_html: Some("<html>страница</html>".to_string()),
+        };
+        let json = serde_json::to_string(&details).unwrap();
+        assert!(!json.contains("raw_html"));
+        assert!(!json.contains("страница"));
+        // После десериализации кэш пуст, но остальные данные целы.
+        let back: MediaDetails = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.item.id, details.item.id);
+        assert!(back.raw_html.is_none());
     }
 }

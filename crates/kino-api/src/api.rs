@@ -1,15 +1,21 @@
 //! Высокоуровневая обёртка над HTTP-клиентом: поиск, каталог и детали.
 
-use kino_core::{CatalogQuery, MediaDetails, MediaItem, Result};
+use std::collections::HashMap;
+
+use kino_core::{CatalogQuery, Episode, KinoError, MediaDetails, MediaItem, Result, StreamQuality};
 use url::Url;
 
+use crate::cdn::parse_episodes_html;
 use crate::client::HttpClient;
+use crate::deobfuscate::deobfuscate;
 use crate::parse::{catalog_url, parse_cards, parse_details, search_url};
+
+/// Путь главного AJAX-эндпоинта HDrezka (`get_movie`/`get_stream`/`get_episodes`).
+const CDN_SERIES_PATH: &str = "/ajax/get_cdn_series/";
 
 /// Обёртка над зеркалом HDrezka. Хранит HTTP-клиент и корень зеркала.
 ///
-/// Реализация трейта [`kino_core::KinoProvider`] появится в задаче #013 вместе
-/// с методами `episodes` и `streams`.
+/// Реализация трейта [`kino_core::KinoProvider`] лежит в `provider_impl` (#013).
 #[derive(Clone)]
 pub struct HdrezkaApi {
     client: HttpClient,
@@ -65,6 +71,106 @@ impl HdrezkaApi {
         let html = self.client.get(page_url).await?.text();
         parse_details(&html, page_url)
     }
+
+    /// Серии всех сезонов для перевода `translator_id` через
+    /// `POST /ajax/get_cdn_series/` (`action=get_episodes`).
+    ///
+    /// Ответ `{"success":true,"episodes":{сезон: "<ul>…</ul>"}}`; при
+    /// `success:false` или иной структуре — `KinoError::Parse`.
+    pub async fn episodes_list(
+        &self,
+        item: &MediaItem,
+        translator_id: u32,
+    ) -> Result<HashMap<u32, Vec<Episode>>> {
+        let url = self.cdn_series_url()?;
+        let id = item.id.to_string();
+        let translator = translator_id.to_string();
+        let form = [
+            ("id", id.as_str()),
+            ("translator_id", translator.as_str()),
+            ("action", "get_episodes"),
+        ];
+        let reply = self.client.post_form(&url, &form).await?;
+        let value = parse_cdn_json(&reply.text(), "get_episodes")?;
+
+        let episodes = value
+            .get("episodes")
+            .and_then(serde_json::Value::as_object)
+            .ok_or_else(|| KinoError::Parse("get_episodes: нет поля episodes".to_string()))?;
+
+        let mut map = HashMap::new();
+        for (season, html) in episodes {
+            let season_id: u32 = season.parse().map_err(|_| {
+                KinoError::Parse(format!("get_episodes: нечисловой сезон «{season}»"))
+            })?;
+            let html = html.as_str().ok_or_else(|| {
+                KinoError::Parse(format!("get_episodes: сезон {season_id} — не строка"))
+            })?;
+            map.insert(season_id, parse_episodes_html(html, season_id)?);
+        }
+        Ok(map)
+    }
+
+    /// Потоки для перевода `translator_id` (и, для сериала, `season`/`episode`)
+    /// через `POST /ajax/get_cdn_series/` (`action=get_stream`).
+    ///
+    /// Ответ `{"success":true,"url":"#h…"}` либо
+    /// `{"success":false,"message":"…"}`. `url` проходит через деобфускацию.
+    /// Поля `season`/`episode` добавляются в форму, только если заданы.
+    pub async fn stream_url(
+        &self,
+        post_id: u32,
+        translator_id: u32,
+        season: Option<u32>,
+        episode: Option<u32>,
+    ) -> Result<Vec<StreamQuality>> {
+        let url = self.cdn_series_url()?;
+        let id = post_id.to_string();
+        let translator = translator_id.to_string();
+        let season_owned = season.map(|value| value.to_string());
+        let episode_owned = episode.map(|value| value.to_string());
+
+        let mut form: Vec<(&str, &str)> = vec![
+            ("id", id.as_str()),
+            ("translator_id", translator.as_str()),
+            ("action", "get_stream"),
+        ];
+        if let Some(season) = season_owned.as_deref() {
+            form.push(("season", season));
+        }
+        if let Some(episode) = episode_owned.as_deref() {
+            form.push(("episode", episode));
+        }
+
+        let reply = self.client.post_form(&url, &form).await?;
+        let value = parse_cdn_json(&reply.text(), "get_stream")?;
+        let raw = value
+            .get("url")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| KinoError::Parse("get_stream: нет поля url".to_string()))?;
+        deobfuscate(raw)
+    }
+
+    fn cdn_series_url(&self) -> Result<Url> {
+        self.base
+            .join(CDN_SERIES_PATH)
+            .map_err(|err| KinoError::Parse(format!("адрес get_cdn_series: {err}")))
+    }
+}
+
+/// Разбирает JSON ответа `get_cdn_series` и проверяет `success:true`. При
+/// `success:false` (или отсутствии булева `success`) — `Parse` с текстом `message`.
+fn parse_cdn_json(body: &str, action: &str) -> Result<serde_json::Value> {
+    let value: serde_json::Value = serde_json::from_str(body)
+        .map_err(|err| KinoError::Parse(format!("{action}: не JSON: {err}")))?;
+    if value.get("success").and_then(serde_json::Value::as_bool) != Some(true) {
+        let message = value
+            .get("message")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("причина не указана");
+        return Err(KinoError::Parse(format!("{action}: {message}")));
+    }
+    Ok(value)
 }
 
 fn site_root(mirror: Url) -> Url {
@@ -79,7 +185,7 @@ fn site_root(mirror: Url) -> Url {
 mod tests {
     use std::time::Duration;
 
-    use wiremock::matchers::{method, path};
+    use wiremock::matchers::{body_string, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     use super::*;
@@ -216,5 +322,128 @@ mod tests {
             .await,
             Err(kino_core::KinoError::AuthRequired)
         );
+    }
+
+    fn sample_item(id: u64) -> MediaItem {
+        MediaItem {
+            id,
+            title: "Сериал".to_string(),
+            original_title: None,
+            year: None,
+            kind: kino_core::MediaKind::Series,
+            poster_url: None,
+            page_url: Url::parse(&format!("https://kvk.pub/series/{id}.html")).expect("url"),
+            rating: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn episodes_list_parses_seasons_and_episodes() {
+        let server = server().await;
+        let body = r#"{"success":true,"episodes":{"1":"<ul><li>1 серия</li><li>2 серия</li></ul>","2":"<ul><li>1 серия</li></ul>"}}"#;
+        Mock::given(method("POST"))
+            .and(path("/ajax/get_cdn_series/"))
+            .and(body_string("id=7&translator_id=111&action=get_episodes"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(body))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let api = HdrezkaApi::new(client(), Url::parse(&server.uri()).expect("url"));
+        let map = api
+            .episodes_list(&sample_item(7), 111)
+            .await
+            .expect("серии");
+        assert_eq!(map.len(), 2);
+        assert_eq!(map[&1].len(), 2);
+        assert_eq!(map[&1][0].title, "1 серия");
+        assert_eq!(map[&1][1].title, "2 серия");
+        assert_eq!(map[&2].len(), 1);
+        assert_eq!(map[&2][0].title, "1 серия");
+    }
+
+    #[tokio::test]
+    async fn episodes_list_success_false_is_parse_error() {
+        let server = server().await;
+        let body = r#"{"success":false,"message":"нет доступа"}"#;
+        Mock::given(method("POST"))
+            .and(path("/ajax/get_cdn_series/"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(body))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let api = HdrezkaApi::new(client(), Url::parse(&server.uri()).expect("url"));
+        let err = api
+            .episodes_list(&sample_item(7), 111)
+            .await
+            .expect_err("ошибка");
+        assert!(matches!(err, kino_core::KinoError::Parse(_)), "{err:?}");
+        assert!(err.to_string().contains("нет доступа"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn stream_url_deobfuscates_obfuscated_url() {
+        let server = server().await;
+        let plain = "[720p]https://cdn.example.com/720.mp4";
+        let obfuscated = format!(
+            "#h{}",
+            base64::Engine::encode(&base64::engine::general_purpose::STANDARD, plain)
+        );
+        let body = format!(r#"{{"success":true,"url":"{obfuscated}"}}"#);
+        Mock::given(method("POST"))
+            .and(path("/ajax/get_cdn_series/"))
+            .and(body_string(
+                "id=85038&translator_id=111&action=get_stream&season=1&episode=2",
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_string(body))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let api = HdrezkaApi::new(client(), Url::parse(&server.uri()).expect("url"));
+        let qualities = api
+            .stream_url(85038, 111, Some(1), Some(2))
+            .await
+            .expect("потоки");
+        assert_eq!(qualities.len(), 1);
+        assert_eq!(qualities[0].label, "720p");
+        assert_eq!(qualities[0].url.as_str(), "https://cdn.example.com/720.mp4");
+    }
+
+    #[tokio::test]
+    async fn stream_url_success_false_is_parse_error() {
+        let server = server().await;
+        let body = r#"{"success":false,"message":"нужен премиум"}"#;
+        Mock::given(method("POST"))
+            .and(path("/ajax/get_cdn_series/"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(body))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let api = HdrezkaApi::new(client(), Url::parse(&server.uri()).expect("url"));
+        let err = api
+            .stream_url(85038, 111, None, None)
+            .await
+            .expect_err("ошибка");
+        assert!(matches!(err, kino_core::KinoError::Parse(_)), "{err:?}");
+        assert!(err.to_string().contains("нужен премиум"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn stream_url_omits_season_and_episode_when_none() {
+        let server = server().await;
+        let body = r#"{"success":true,"url":"[360p]https://cdn.example.com/360.mp4"}"#;
+        Mock::given(method("POST"))
+            .and(path("/ajax/get_cdn_series/"))
+            .and(body_string("id=85038&translator_id=111&action=get_stream"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(body))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let api = HdrezkaApi::new(client(), Url::parse(&server.uri()).expect("url"));
+        let qualities = api
+            .stream_url(85038, 111, None, None)
+            .await
+            .expect("потоки");
+        assert_eq!(qualities.len(), 1);
+        assert_eq!(qualities[0].label, "360p");
     }
 }

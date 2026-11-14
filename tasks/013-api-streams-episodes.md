@@ -1,7 +1,7 @@
 ---
 id: 013
 type: feature
-status: open
+status: review
 model: deepseek-v4-pro
 crate: kino-api
 created: 2026-11-14
@@ -27,3 +27,11 @@ created: 2026-11-14
 ## Заметки
 
 Зависит от #007, #011, #012. Живую проверку параметров `get_cdn_series` делает заказчик через пример `cli`, пароль вводится в терминале.
+
+2026-11-14: `KinoProvider` реализован для `HdrezkaApi`. 156 тестов `kino-api` (+3 интеграционных), 24 `kino-core`, `fmt`/`clippy`/обе архитектуры зелёные.
+- Проверено на РЕАЛЬНОЙ фикстуре фильма: `extract_player_data` (post_id 85038, translator_id 111) и весь путь `streams(&details, None)` до `StreamQuality` (4+ качества, премиум `1080p Ultra`).
+- НЕ проверено на реальных страницах: сериалы (`initCDNSeriesEvents`, `action=get_episodes`, `action=get_stream`). Фикстур сериала нет, код написан по ARCHITECTURE.md и покрыт wiremock и синтетикой. После `capture` с реальной страницей сериала формат нужно сверить.
+- Публичное API `kino-core`: добавлены `Episode` и `MediaDetails::raw_html` (`#[serde(skip)]`, HTML нужен для потоков фильма), `KinoProvider::episodes`/`streams` переписаны, `StreamRequest` удалён. `CRATE.md` обновлён.
+- Перевод берётся первый из списка (`translators[0]`). Выбор другого перевода для фильма (`action=get_movie`) не реализован.
+- Пример `play`: `cargo run -p kino-api --example play -- <url страницы>`.
+- PR поверх ветки #007 (PR #12).
