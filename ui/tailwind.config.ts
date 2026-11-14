@@ -10,6 +10,13 @@ export default {
         text: "#F5F5F7",
         "text-2": "#86868B",
         accent: "#FA233B",
+        status: {
+          open: "#30D158",
+          login: "#FFD60A",
+          challenge: "#FF9F0A",
+          dead: "#FF453A",
+          unknown: "#86868B",
+        },
       },
       fontFamily: {
         sans: ['"SF Pro Display"', "-apple-system", "BlinkMacSystemFont", "sans-serif"],

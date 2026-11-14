@@ -1,7 +1,14 @@
 // Единственное место, где UI знает о Tauri и сгенерированных привязках.
-import { commands, type BootState, type IpcError, type UserDto } from "./bindings";
+import {
+  commands,
+  type BootState,
+  type IpcError,
+  type MirrorDto,
+  type MirrorStateDto,
+  type UserDto,
+} from "./bindings";
 
-export type { BootState, IpcError, UserDto };
+export type { BootState, IpcError, MirrorDto, MirrorStateDto, UserDto };
 
 export type Outcome<T> = { ok: true; value: T } | { ok: false; error: IpcError };
 
@@ -10,6 +17,10 @@ export interface Api {
   login(email: string, password: string): Promise<Outcome<UserDto>>;
   logout(): Promise<Outcome<null>>;
   session(): Promise<UserDto | null>;
+  mirrors(): Promise<Outcome<MirrorDto[]>>;
+  checkMirrors(): Promise<Outcome<MirrorDto[]>>;
+  addMirror(url: string): Promise<Outcome<MirrorDto>>;
+  selectMirror(url: string): Promise<Outcome<MirrorDto>>;
   quit(): Promise<void>;
 }
 
@@ -54,6 +65,10 @@ export const tauriApi: Api = {
       return null;
     }
   },
+  mirrors: () => call(() => commands.mirrors()),
+  checkMirrors: () => call(() => commands.checkMirrors()),
+  addMirror: (url) => call(() => commands.addMirror(url)),
+  selectMirror: (url) => call(() => commands.selectMirror(url)),
   quit: async () => {
     try {
       await commands.quit();
