@@ -318,6 +318,90 @@ cargo run -p kino-api --example login -- [--mirror URL] [--email EMAIL] [--logou
 - `--logout` удаляет запись из Keychain и печатает `credentials removed`.
 - Неверные аргументы: справка, код 2. `--help`: справка, код 0.
 
+## Парсинг и API (`parse`, `api`, `sanitize`)
+
+Зависимость — `scraper = "=0.29.0"` (зафиксирована в `[workspace.dependencies]`,
+`default-features = false`, чтобы не тянуть демо-CLI `getopts`). Парсинг чистых
+функций без сети; сеть — только в `HdrezkaApi`.
+
+Реэкспортировано из корня крейта: `HdrezkaApi`, `parse_cards`, `parse_details`,
+`parse_last_page`, `catalog_url`, `search_url`, `sanitize_page`, `contains_email`.
+
+```rust
+pub fn parse_cards(html: &str, base: &Url) -> Result<Vec<MediaItem>>;
+pub fn parse_details(html: &str, page_url: &Url) -> Result<MediaDetails>;
+pub fn parse_last_page(html: &str) -> Option<u32>;
+pub fn catalog_url(base: &Url, kind: Option<MediaKind>, page: u32) -> Result<Url>;
+pub fn search_url(base: &Url, query: &str, page: u32) -> Result<Url>;
+pub fn sanitize_page(html: &str) -> String;
+pub fn contains_email(html: &str) -> bool;
+```
+
+`HdrezkaApi` — обёртка над `HttpClient` и корнем зеркала (inherent-методы, не трейт):
+
+```rust
+pub struct HdrezkaApi { /* клиент + корень зеркала */ }
+impl HdrezkaApi {
+    pub fn new(client: HttpClient, mirror: Url) -> Self;          // mirror приводится к `/`
+    pub fn base(&self) -> &Url;
+    pub async fn search(&self, query: &str, page: u32) -> Result<Vec<MediaItem>>;
+    pub async fn catalog(&self, query: CatalogQuery) -> Result<Vec<MediaItem>>;
+    pub async fn details(&self, item: &MediaItem) -> Result<MediaDetails>;
+    pub async fn details_at(&self, page_url: &Url) -> Result<MediaDetails>; // детали по адресу
+}
+```
+
+### Что проверено на реальной странице
+
+Парсер деталей (`parse_details`) проверен на реальной обезличенной странице фильма
+`tests/fixtures/film_85038.html` (kvk.pub, после входа, 2026-11-14). Подтверждённые
+селекторы: `input#post_id`, `meta[property="og:url"]`, `meta[property="og:type"]`,
+`.b-post__title h1`, `.b-post__origtitle`, `.b-post__description_text`,
+таблица `.b-post__info` (строки `tr`, в первой ячейке `h2`-заголовок поля),
+`#translators-list li[data-translator_id]`, рейтинг `.b-post__rating span.num`,
+постер `img[itemprop="image"]`.
+
+Расхождения с исходным списком, выясненные по фикстуре (прав реальный HTML):
+
+- Года в виде отдельной строки «Год» нет; год берётся из строки **«Дата выхода»**
+  (`6 июля 2026 года` → `2026`), с запасным вариантом «Год».
+- Рейтинг HDrezka лежит в `span.num` внутри `.b-post__rating` и равен `7.15`
+  (это не IMDb/Кинопоиск из строки «Рейтинги»).
+- Длительность — строка «Время» (`172 мин.` → `172`).
+- Стран/жанров в фикстуре по две/четыре строки; берутся тексты ссылок внутри
+  второй ячейки строки.
+
+### Что НЕ проверено на реальной странице
+
+Каталог и поиск (селекторы `div.b-content__inline_item` и вложенные) не проверены
+на живых страницах. Источники: исходники двух открытых библиотек (`ndenissov/HDRezka`,
+`kristal374/hdrezka-api`, обе MIT) и просмотр главной kvk.pub 2026-11-14 (на главной
+подтверждён только контейнер карточки с `data-id` и `data-url`). Пути разделов
+`series`/`animation` и разметка сезонов/серий (`li.b-simple_season__item[data-tab_id]`,
+`li.b-simple_episode__item[data-season_id][data-episode_id]`) — предположение по
+исходникам, проверяется только синтетическим фрагментом.
+
+### Как получить реальные фикстуры
+
+```
+cargo run -p kino-api --example capture -- --out <каталог>
+```
+
+После входа (`cargo run -p kino-api --example login`) делает ровно по одному GET:
+главная, каталог фильмов (`/films/`), поиск `the`, одна страница фильма и одна
+страница сериала (адреса — первая карточка `Movie` и первая `Series` из
+распарсованного каталога; если сериала нет — пропускается с сообщением). Каждая
+страница обезличивается `sanitize_page` (скрытые поля `member_user_id`,
+`member_user_token`, `ctrl_token_id`, `ctrl_favs`, `dle_login_hash`, `profileId`,
+`email`, ник в `name`-поле комментариев, `geo_ip`, `"streams":"…"` и `thumbnails`)
+и проверяется, что сырой почты не осталось; при неудаче файл не пишется.
+
+### `KinoProvider`
+
+Трейт `kino_core::KinoProvider` здесь НЕ реализован: его методы `episodes` и
+`streams` — задача #013, заглушек нет. `HdrezkaApi` покрывает пока `search`,
+`catalog` и `details` как inherent-методы.
+
 ## Деобфускация (`deobfuscate`)
 
 Реэкспортирована из корня крейта: `deobfuscate`.
@@ -406,6 +490,17 @@ cargo test -p kino-api
 не-JSON, пустое тело и JSON без `success`, нет куки или она не число, форма входа после входа, `Challenge`,
 ник из `input#name` и запасной вариант, `AuthRequired`, пароль не сохраняется при отказе, `Debug` без пароля,
 эхо пароля сервером, очистка HTML. Для `post_form_with_headers`: заголовки уходят, `Challenge` определяется.
+
+Для `parse`: `details` по реальной фикстуре фильма (`id=85038`, 8 переводов, год,
+страны, жанры, длительность), `parse_cards` на синтетических фрагментах (полная
+карточка, без рейтинга/постера, год-диапазон, относительные ссылки, kind по пути,
+мусор без `data-id`, пустая страница, страница входа), сезоны/серии на синтетике,
+формирование URL поиска (кириллица, percent-encoding, `page=1` без `&page`) и
+каталога (каждый `MediaKind`, `page>1`). Для `api` (wiremock): `search`/`catalog`/
+`details` шлют верный путь, пустой запрос без сети, 404 → `NotFound`, страница
+входа → `AuthRequired`. Для `sanitize`: каждое перечисленное поле заменяется,
+структура HTML сохраняется, `contains_email` отличает реальную почту от
+заглушки `user@example.com`.
 
 ## Сборка
 
