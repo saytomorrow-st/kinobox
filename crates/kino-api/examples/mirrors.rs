@@ -1,6 +1,8 @@
 use std::process::ExitCode;
 
-use kino_api::{ClientConfig, HttpClient, MemoryMirrorStore, MirrorConfig, MirrorPool};
+use kino_api::{
+    ClientConfig, HttpClient, MemoryMirrorStore, MirrorConfig, MirrorPool, MirrorState,
+};
 use url::Url;
 
 const USAGE: &str = "usage: mirrors [--known URL]... [--manual URL]";
@@ -29,6 +31,22 @@ fn parse_args() -> Result<Args, String> {
     Ok(Args { known, manual })
 }
 
+fn verdict(state: MirrorState) -> &'static str {
+    match state {
+        MirrorState::Open => "OPEN     ",
+        MirrorState::NeedsLogin => "LOGIN    ",
+        MirrorState::Challenge => "CHALLENGE",
+        MirrorState::Dead => "DEAD     ",
+    }
+}
+
+fn mode(state: MirrorState) -> &'static str {
+    match state {
+        MirrorState::Open => "open",
+        _ => "login required",
+    }
+}
+
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> ExitCode {
     let args = match parse_args() {
@@ -46,16 +64,16 @@ async fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let config = match MirrorConfig::new() {
-        Ok(config) => MirrorConfig {
-            known: args.known,
-            ..config
-        },
+    let mut config = match MirrorConfig::new() {
+        Ok(config) => config,
         Err(err) => {
             eprintln!("{err} ({err:?})");
             return ExitCode::FAILURE;
         }
     };
+    if !args.known.is_empty() {
+        config.known = args.known;
+    }
     let standby = config.standby.clone();
     let pool = match MirrorPool::new(&client, MemoryMirrorStore::new(), config) {
         Ok(pool) => pool,
@@ -68,7 +86,6 @@ async fn main() -> ExitCode {
     let mut statuses = pool.health_check().await;
     statuses.push(pool.probe_standby().await);
     for status in &statuses {
-        let verdict = if status.alive { "OK  " } else { "DEAD" };
         let latency = status
             .latency
             .map(|latency| format!("{} ms", latency.as_millis()))
@@ -79,7 +96,11 @@ async fn main() -> ExitCode {
         } else {
             ""
         };
-        println!("{verdict}  {}{label}  {latency}  {reason}", status.url);
+        println!(
+            "{}  {}{label}  {latency}  {reason}",
+            verdict(status.state),
+            status.url
+        );
     }
 
     let result = match args.manual {
@@ -87,8 +108,8 @@ async fn main() -> ExitCode {
         None => pool.resolve().await,
     };
     match result {
-        Ok(url) => {
-            println!("active: {url}");
+        Ok(mirror) => {
+            println!("active: {} ({})", mirror.url, mode(mirror.state));
             ExitCode::SUCCESS
         }
         Err(err) => {

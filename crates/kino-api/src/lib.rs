@@ -7,5 +7,6 @@ pub mod mirrors;
 pub use client::{ClientConfig, HttpClient, Response};
 pub use deobfuscate::deobfuscate;
 pub use mirrors::{
-    MemoryMirrorStore, MirrorConfig, MirrorPool, MirrorStatus, MirrorStore, LOGIN_STUB_MARKERS,
+    MemoryMirrorStore, MirrorConfig, MirrorPool, MirrorState, MirrorStatus, MirrorStore,
+    ResolvedMirror, LOGIN_STUB_MARKERS,
 };
