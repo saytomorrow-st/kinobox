@@ -29,6 +29,7 @@ let reply = client.post_form(&url, &[("q", "кино")]).await?;
 - `new(ClientConfig) -> Result<HttpClient>`: ошибка сборки клиента приходит как `KinoError::Network`.
 - `get(&Url) -> Result<Response>`
 - `post_form(&Url, &[(&str, &str)]) -> Result<Response>`: тело `application/x-www-form-urlencoded`.
+- `post_form_with_headers(&Url, form, headers: &[(&str, &str)]) -> Result<Response>`: то же с дополнительными заголовками запроса (имя, значение). Retry и определение `Challenge` те же.
 - `config() -> &ClientConfig`
 - Клиент дёшево клонируется, клоны делят пул соединений и cookie-хранилище.
 - Cookie-хранилище включено и общее для всех запросов клиента (для сессии в M2).
@@ -228,6 +229,95 @@ cargo run -p kino-api --example mirrors -- [--known URL]... [--manual URL]
 Каждый адрес запрашивается до двух раз: один раз для вывода статуса, второй раз внутри `resolve`.
 Результат зависит от IP и состояния сайта.
 
+## Сессия и вход (`session`)
+
+Реэкспортировано из корня крейта: `Password`, `Credentials`, `SecretStore`, `KeychainSecretStore`,
+`MemorySecretStore`, `login`, `ensure_logged_in`, `login_and_remember`.
+
+```rust
+pub struct Password(/* приватно */);          // Debug = "Password(***)", без Display и Serialize
+pub struct Credentials { pub email: String, pub password: Password }
+
+pub trait SecretStore: Send + Sync {
+    fn load(&self)  -> impl Future<Output = Result<Option<Credentials>>> + Send;
+    fn save(&self, credentials: &Credentials) -> impl Future<Output = Result<()>> + Send;
+    fn clear(&self) -> impl Future<Output = Result<()>> + Send;
+}
+
+pub async fn login(client: &HttpClient, mirror: &Url, credentials: &Credentials) -> Result<UserSession>;
+pub async fn ensure_logged_in<S: SecretStore>(client: &HttpClient, mirror: &Url, store: &S) -> Result<UserSession>;
+pub async fn login_and_remember<S: SecretStore>(client: &HttpClient, mirror: &Url, store: &S, credentials: &Credentials) -> Result<UserSession>;
+```
+
+`Password::new(impl Into<String>)`, `expose() -> &str` (только для отправки на сайт и записи в Keychain).
+
+### Поток входа (`login`)
+
+1. `POST {корень зеркала}/ajax/login/`, `application/x-www-form-urlencoded`: `login_name` (email), `login_password`,
+   `login_not_save=0`. Заголовки `X-Requested-With: XMLHttpRequest`, `Referer: {корень зеркала}`. Путь, запрос и
+   фрагмент переданного адреса отбрасываются.
+2. Разбор JSON. Читаются только `success`, `message`, `logged_email`:
+   - `success: true`: дальше;
+   - `success: false` и `logged_email` (непустая строка): `LoginRejected("уже выполнен вход под другим аккаунтом: <email>")`;
+   - `success: false` и `message`-строка: `LoginRejected(<текст без HTML>)`; пустой текст даёт «причина не указана сайтом»;
+   - `success: false` и `message`-объект: значения ключей `email`, `password`, `login_name`, `login_password` (в таком порядке)
+     через `; `. Если ни одного известного ключа нет, `Parse`;
+   - не JSON, пустое тело, не объект, нет `success` или он не булев, `success: false` без `message` и `logged_email`: `Parse`.
+3. `user_id` из `Set-Cookie: dle_user_id=<число>` ответа (при повторах берётся последняя). Нет куки или не число: `Parse`.
+4. `GET` главной. Если в теле есть `id="loginForm"`, вернётся `LoginRejected("вход не засчитан: ...")`.
+5. Ник: `<input ... id="name" ... value="...">` на главной; если поля нет или оно пустое, часть email до `@`
+   (при пустой части `user`). Что поле `input#name` присутствует на главной, не проверено: видели его только на странице фильма.
+6. Результат `UserSession { user_id, username }`.
+
+`Challenge` на любом шаге приходит как `Err(KinoError::Challenge)`. Куки (`dle_user_id`, `dle_password`, `PHPSESSID`)
+остаются в cookie-хранилище `HttpClient` в памяти. При смене зеркала или перезапуске вход повторяется сохранёнными данными.
+
+Очистка причины отказа: теги заменяются пробелом, сущности (`&amp;`, `&lt;`, `&#33;` и т. п.) раскрываются, пробелы схлопываются.
+Пароль из запроса вырезается из текста до и после очистки (замена на `***`), поэтому сервер, «эхом» вернувший пароль, его не раскроет.
+
+### Высокоуровневые функции
+
+- `ensure_logged_in`: `store.load()`; нет данных: `Err(KinoError::AuthRequired)`; иначе `login`. Ничего не сохраняет.
+- `login_and_remember`: `login`, и только после успеха `store.save()`. Отклонённый, неверный или не засчитанный
+  пароль в хранилище не попадает.
+
+### Что хранится и что нет
+
+- Keychain: сервис `kinobox`, одна запись (аккаунт `hdrezka-credentials`) с JSON `{"email", "password"}`.
+- Куки в Keychain **не** пишутся.
+- `UserSession` пароля не содержит.
+- Блокирующий API `keyring` вызывается через `tokio::task::spawn_blocking`.
+- Ошибки Keychain приходят как `KinoError::Keychain(описание)`; описание берётся из `keyring::Error`, пароль в него не попадает.
+  Повреждённая запись даёт `Keychain("запись с учётными данными повреждена")`. Отсутствие записи не ошибка: `load` возвращает `None`, `clear` успешен.
+- `MemorySecretStore` для тестов и примеров без Keychain.
+
+### Правила безопасности
+
+- Пароль только в `Password`: `Debug` печатает `Password(***)`, `Display` и `Serialize` не реализованы.
+- Пароль не попадает в логи, тексты ошибок, `UserSession`, аргументы командной строки и переменные окружения.
+- Пример читает пароль только через `rpassword::prompt_password` (скрытый ввод в терминале).
+- Тесты и CI используют `MemorySecretStore` и `wiremock`, реальный Keychain и реальный сайт не трогаются.
+
+### Зависимости
+
+`keyring =4.2.0` (по умолчанию фича `v1`: на macOS подтягивает `apple-native-keyring-store` с Keychain Services, API `keyring::Entry`),
+`rpassword =7.5.5` (только `[dev-dependencies]`, для примера), `serde_json` (разбор ответа входа и запись в Keychain).
+Оба таргета `x86_64-apple-darwin` и `aarch64-apple-darwin` собираются (`cargo check --workspace --target ...`).
+
+### Проверка руками
+
+```
+cargo run -p kino-api --example login -- [--mirror URL] [--email EMAIL] [--logout]
+```
+
+- Без `--mirror` зеркало выбирает `MirrorPool` (список по умолчанию), печатается `mirror: <url> (open|login required)`.
+- Если в Keychain есть данные и `--email` не задан, берутся они. Если `--email` задан или данных нет: email спрашивается
+  (когда не задан), пароль спрашивается скрыто.
+- Успех: данные сохраняются в Keychain, печатается `logged in as <ник> (id N)`.
+- Ошибка: текст в stderr (без пароля), код выхода 1. Челлендж и отсутствие зеркал дают отдельные сообщения.
+- `--logout` удаляет запись из Keychain и печатает `credentials removed`.
+- Неверные аргументы: справка, код 2. `--help`: справка, код 0.
+
 ## Деобфускация (`deobfuscate`)
 
 Реэкспортирована из корня крейта: `deobfuscate`.
@@ -312,6 +402,10 @@ cargo test -p kino-api
 выбор активного без обхода списка, fallback на `known`, приоритет по порядку списка, standby с редиректом и без,
 таймаут пробы, `mark_dead` с TTL, `add_manual` (`NeedsLogin` принимается, `Challenge` не меняет активное),
 порядок и состояния в `health_check`.
+Для `session`: успешный вход (поля формы, заголовки, `UserSession`), отказ со строкой и объектом в `message`, `logged_email`,
+не-JSON, пустое тело и JSON без `success`, нет куки или она не число, форма входа после входа, `Challenge`,
+ник из `input#name` и запасной вариант, `AuthRequired`, пароль не сохраняется при отказе, `Debug` без пароля,
+эхо пароля сервером, очистка HTML. Для `post_form_with_headers`: заголовки уходят, `Challenge` определяется.
 
 ## Сборка
 

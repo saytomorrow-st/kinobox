@@ -119,17 +119,32 @@ impl HttpClient {
     }
 
     pub async fn get(&self, url: &Url) -> Result<Response> {
-        self.execute(url, None).await
+        self.execute(url, None, &[]).await
     }
 
     pub async fn post_form(&self, url: &Url, form: &[(&str, &str)]) -> Result<Response> {
-        self.execute(url, Some(form)).await
+        self.execute(url, Some(form), &[]).await
     }
 
-    async fn execute(&self, url: &Url, form: Option<&[(&str, &str)]>) -> Result<Response> {
+    /// Как `post_form`, плюс дополнительные заголовки запроса (имя, значение).
+    pub async fn post_form_with_headers(
+        &self,
+        url: &Url,
+        form: &[(&str, &str)],
+        headers: &[(&str, &str)],
+    ) -> Result<Response> {
+        self.execute(url, Some(form), headers).await
+    }
+
+    async fn execute(
+        &self,
+        url: &Url,
+        form: Option<&[(&str, &str)]>,
+        headers: &[(&str, &str)],
+    ) -> Result<Response> {
         let mut attempt: u32 = 0;
         loop {
-            match self.send_once(url, form).await {
+            match self.send_once(url, form, headers).await {
                 Ok(mut response) => {
                     response.attempts = attempt.saturating_add(1);
                     return Ok(response);
@@ -152,11 +167,15 @@ impl HttpClient {
         &self,
         url: &Url,
         form: Option<&[(&str, &str)]>,
+        extra_headers: &[(&str, &str)],
     ) -> std::result::Result<Response, Failure> {
-        let request = match form {
+        let mut request = match form {
             Some(fields) => self.inner.post(url.as_str()).form(fields),
             None => self.inner.get(url.as_str()),
         };
+        for (name, value) in extra_headers {
+            request = request.header(*name, *value);
+        }
         let response = request.send().await.map_err(map_transport_error)?;
 
         let status = response.status().as_u16();
@@ -777,6 +796,52 @@ mod tests {
             .expect("ожидали успех");
         assert_eq!(response.status, 200);
         assert_eq!(response.text(), "{}");
+    }
+
+    #[tokio::test]
+    async fn post_form_with_headers_sends_extra_headers() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/ajax/login/"))
+            .and(header("x-requested-with", "XMLHttpRequest"))
+            .and(header("referer", "https://example.test/"))
+            .and(body_string("a=1"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("{}"))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let response = client(test_config())
+            .post_form_with_headers(
+                &url(&server, "/ajax/login/"),
+                &[("a", "1")],
+                &[
+                    ("X-Requested-With", "XMLHttpRequest"),
+                    ("Referer", "https://example.test/"),
+                ],
+            )
+            .await
+            .expect("ожидали успех");
+        assert_eq!(response.status, 200);
+    }
+
+    #[tokio::test]
+    async fn post_form_with_headers_still_detects_challenge() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string("<html><title>Проверяем, что вы не бот!</title></html>"),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let err = client(test_config())
+            .post_form_with_headers(&url(&server, "/"), &[("a", "1")], &[("X-Test", "1")])
+            .await
+            .expect_err("ожидали ошибку");
+        assert_eq!(err, KinoError::Challenge);
     }
 
     #[tokio::test]
