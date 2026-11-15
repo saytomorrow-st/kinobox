@@ -4,7 +4,6 @@ use kino_api::{
     login as site_login, login_and_remember, Credentials, MirrorStore, Password, SecretStore,
 };
 use kino_core::KinoError;
-use url::Url;
 
 use crate::dto::{BootState, UserDto};
 use crate::error::IpcError;
@@ -71,13 +70,6 @@ impl<S: SecretStore, M: MirrorStore> AppService<S, M> {
         self.set_session(None);
         self.reset_client()?;
         Ok(())
-    }
-
-    async fn mirror_url(&self) -> Result<Url, IpcError> {
-        match self.pool.store().active().await {
-            Some(url) => Ok(url),
-            None => Ok(self.pool.resolve().await?.url),
-        }
     }
 }
 

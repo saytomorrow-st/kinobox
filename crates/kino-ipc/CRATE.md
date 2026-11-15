@@ -1,9 +1,10 @@
 # kino-ipc
 
-Сервисный слой между UI и `kino-api`: запуск, вход, выход, зеркала. Без зависимости от Tauri.
+Сервисный слой между UI и `kino-api`: запуск, вход, выход, зеркала, каталог. Без зависимости от Tauri.
 Команды `tauri::command` добавляет `src-tauri` (#015), здесь только `AppService` и DTO с `serde` и `specta::Type`.
 
 Реэкспортировано из корня крейта: `AppService`, `BootState`, `UserDto`, `MirrorDto`, `MirrorStateDto`,
+`MediaKindDto`, `MediaItemDto`, `MediaDetailsDto`, `TranslatorDto`, `SeasonDto`, `EpisodeDto`,
 `IpcError`, `IpcErrorKind`, `ClientConfig`, `MirrorConfig`, `KeychainSecretStore`, `MemorySecretStore`,
 `MemoryMirrorStore`.
 
@@ -25,6 +26,11 @@ impl<S: SecretStore, M: MirrorStore> AppService<S, M> {
     pub async fn check_mirrors(&self) -> Vec<MirrorDto>;
     pub async fn add_mirror(&self, url: String) -> Result<MirrorDto, IpcError>;
     pub async fn select_mirror(&self, url: String) -> Result<MirrorDto, IpcError>;
+
+    pub async fn catalog(&self, kind: Option<MediaKindDto>, page: u32) -> Result<Vec<MediaItemDto>, IpcError>;
+    pub async fn search(&self, query: String) -> Result<Vec<MediaItemDto>, IpcError>;
+    pub async fn details(&self, item: MediaItemDto) -> Result<MediaDetailsDto, IpcError>;
+    pub async fn episodes(&self, details: MediaDetailsDto) -> Result<Vec<EpisodeDto>, IpcError>;
 }
 ```
 
@@ -53,6 +59,25 @@ impl<S: SecretStore, M: MirrorStore> AppService<S, M> {
   в адресе), путь, запрос и фрагмент отбрасываются. Затем `add_manual` и, при успехе, сброс сессии и cookie, потому что
   куки привязаны к домену. Следующие `login` и `boot` идут на новом зеркале. При ошибке (в том числе `Challenge`)
   активное зеркало и сессия не меняются. Введённый адрес в текст ошибки не попадает.
+- `catalog`, `search`, `details`, `episodes`: тонкий слой над `kino_core::KinoProvider`, который реализует
+  `kino_api::HdrezkaApi` (`provider_impl.rs`). Логики парсинга или сети здесь нет — только выбор зеркала и
+  конвертация DTO. Ошибки `KinoProvider` (включая `AuthRequired`, `NotFound` → `internal`) идут через обычный
+  `From<KinoError> for IpcError`.
+
+### `HdrezkaApi` и активное зеркало
+
+`AppService` не хранит `HdrezkaApi` в полях: активное зеркало может поменяться в любой момент через
+`select_mirror`/`add_mirror` (они делают `reset_client`), и застрявший в поле провайдер держал бы старый `base`.
+Вместо этого приватный метод `provider()` на каждый вызов каталога:
+
+1. берёт активное зеркало через тот же путь, что `login` (`mirror_url`: `pool.store().active()`, а если зеркала
+   ещё нет — `pool.resolve()`, чтобы первый вызов `catalog`/`search` до входа тоже работал);
+2. строит свежий `HdrezkaApi::new(self.client(), mirror)` — конструктор дешёвый (клонирует `HttpClient`, у которого
+   внутри `Arc`-подобное соединение, и присваивает `base`).
+
+`catalog`/`search`/`details`/`episodes` зовут `KinoProvider`-методы этого `HdrezkaApi` (для `search` — явно
+`KinoProvider::search(&provider, &query)`, потому что у `HdrezkaApi` есть одноимённый inherent-метод с пагинацией,
+который иначе перекрыл бы метод трейта).
 
 ## Правило про пароль
 
@@ -71,6 +96,12 @@ impl<S: SecretStore, M: MirrorStore> AppService<S, M> {
 | `BootState` | тег `state`: `needsLogin { email: string \| null }`, `signedIn { user: UserDto }`, `unavailable { message: string }` |
 | `MirrorStateDto` | `unknown`, `open`, `needsLogin`, `challenge`, `dead` |
 | `MirrorDto` | `{ url, state, reason: string \| null, latencyMs: number \| null, active, standby }` (latencyMs экспортируется как `number`) |
+| `MediaKindDto` | `movie`, `series`, `cartoon`, `anime` — зеркало `kino_core::MediaKind`, `From`/`Into` в обе стороны |
+| `MediaItemDto` | `{ id: number, title, originalTitle: string \| null, year: number \| null, kind: MediaKindDto, posterUrl: string \| null, pageUrl: string, rating: number \| null }`. `id` экспортируется как `number`; `posterUrl`/`pageUrl` — строки (не `Url`, у `specta` нет для него типа). `try_into_media_item` разбирает их обратно и возвращает `InvalidInput`, если UI подсунул испорченный DTO |
+| `MediaDetailsDto` | `{ item: MediaItemDto, description: string \| null, genres: string[], countries: string[], durationMinutes: number \| null, translators: TranslatorDto[], seasons: SeasonDto[] }`. Поля ровно эти — `raw_html` отсутствует физически, не просто скрыт сериализацией (см. тест `media_details_dto_has_no_raw_html_field_at_all`) |
+| `TranslatorDto` | `{ id: number, name: string }` |
+| `SeasonDto` | `{ number, episodes: number[] }` |
+| `EpisodeDto` | `{ seasonId, episodeId, title }` |
 | `IpcError` | `{ kind: IpcErrorKind, message: string }`, реализует `Display` и `std::error::Error` |
 | `IpcErrorKind` | `invalidInput`, `loginRejected`, `authRequired`, `challenge`, `network`, `keychain`, `noMirrors`, `internal` |
 
@@ -105,9 +136,10 @@ impl<S: SecretStore, M: MirrorStore> AppService<S, M> {
 `async fn login(state: State<'_, Service>, email: String, password: String) -> Result<UserDto, IpcError>`.
 Типы получают `specta::Type` одним derive. `IpcError` сериализуется как есть. Логику в командах не дублировать.
 
-**Specta и u64:** поля `user_id` и `latency_ms` помечены `#[specta(type = f64)]` (или `Option<f64>`) для экспорта
-в TypeScript как `number`. ID пользователей HDrezka укладываются в JS-число (до 2^53-1), потерь точности нет.
-`latencyMs` в миллисекундах редко превысит 10000, а потери <1мс несущественны. Serde-сериализация остаётся `u64`.
+**Specta и u64:** поля `user_id`, `latency_ms` и ID в `MediaItemDto`/`TranslatorDto` помечены
+`#[specta(type = Number)]` (или `Option<Number>`) для экспорта в TypeScript как `number`. ID HDrezka укладываются
+в JS-число (до 2^53-1), потерь точности нет. `latencyMs` в миллисекундах редко превысит 10000, а потери <1мс
+несущественны. Serde-сериализация остаётся `u64`.
 
 ## Тесты
 
@@ -118,4 +150,8 @@ cargo test -p kino-ipc
 `wiremock` и `MemorySecretStore`, без реальной сети и Keychain. Покрыто: все исходы `boot`, `login` (успех, отказ,
 пустые поля с проверкой счётчика запросов), `logout` (стор, сессия, cookie), состояния и флаг `active` в
 `mirrors`/`check_mirrors`, валидация и ошибки `add_mirror`, сброс сессии в `select_mirror`, отсутствие пароля в Debug
-и JSON, форма JSON у `BootState`, `MirrorDto`, `IpcError`.
+и JSON, форма JSON у `BootState`, `MirrorDto`, `IpcError`. Для каталога: `catalog`/`search`/`details`/`episodes`
+на активном и на не выбранном зеркале (авторезолв), `NoMirrors` без рабочих зеркал, пустой поиск без запроса,
+отказ `details` на невалидном `MediaItemDto` без похода в сеть, `episodes` для фильма без сезонов без похода
+в сеть, а также DTO-тесты в `dto.rs`: форма JSON (`camelCase`), оба направления конвертации `MediaItemDto`/
+`MediaDetailsDto`, и явная проверка, что `MediaDetailsDto` физически не содержит `raw_html`.

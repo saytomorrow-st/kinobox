@@ -2,10 +2,14 @@
 
 use std::sync::{Mutex, PoisonError, RwLock};
 
-use kino_api::{ClientConfig, HttpClient, MirrorConfig, MirrorPool, MirrorStore, SecretStore};
+use kino_api::{
+    ClientConfig, HdrezkaApi, HttpClient, MirrorConfig, MirrorPool, MirrorStore, SecretStore,
+};
 use kino_core::{Result, UserSession};
+use url::Url;
 
 use crate::dto::UserDto;
+use crate::error::IpcError;
 
 /// Сервис под `tauri::command`. Пароль в полях не хранится: он приходит аргументом `login`
 /// и сразу оборачивается в `Password`.
@@ -60,5 +64,21 @@ impl<S: SecretStore, M: MirrorStore> AppService<S, M> {
         let fresh = HttpClient::new(self.client().config().clone())?;
         *self.client.write().unwrap_or_else(PoisonError::into_inner) = fresh;
         Ok(())
+    }
+
+    /// Активное зеркало; если его ещё нет, выбирает одно (`resolve`).
+    pub(crate) async fn mirror_url(&self) -> std::result::Result<Url, IpcError> {
+        match self.pool.store().active().await {
+            Some(url) => Ok(url),
+            None => Ok(self.pool.resolve().await?.url),
+        }
+    }
+
+    /// `HdrezkaApi`, построенный на HTTP-клиенте и текущем активном зеркале. Зеркало может
+    /// меняться (`select_mirror`/`add_mirror`), поэтому `HdrezkaApi` не хранится в полях сервиса,
+    /// а собирается заново перед каждым обращением к каталогу.
+    pub(crate) async fn provider(&self) -> std::result::Result<HdrezkaApi, IpcError> {
+        let mirror = self.mirror_url().await?;
+        Ok(HdrezkaApi::new(self.client(), mirror))
     }
 }
