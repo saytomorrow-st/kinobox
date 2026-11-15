@@ -102,6 +102,11 @@ cargo tauri build --target universal-apple-darwin     # релизная сбо�
 
 Требуется: Rust stable (≥ 1.98), Node 22, pnpm 9, Xcode CLT.
 
+Плеер построен на `libmpv` (mpv) — **LGPL-2.1**. В готовом `.app` библиотека
+`libmpv.dylib` лежит внутри бандла (`Contents/Frameworks/`), поэтому Homebrew и
+mpv пользователю ставить не нужно; свою версию библиотеки можно подложить
+вручную. Подробности, исходники и правила замены — в [NOTICE](NOTICE).
+
 При запуске приложение читает macOS Keychain (сервис `kinobox`): если данные там есть, вход
 происходит автоматически и сразу открывается главное окно. Если данных нет или сайт их отклонил,
 показывается окно входа — без входа приложением пользоваться нельзя.
@@ -110,6 +115,7 @@ cargo tauri build --target universal-apple-darwin     # релизная сбо�
 
     AGENTS.md                      правила работы агентов
     ARCHITECTURE.md                архитектура и дизайн-система
+    NOTICE                         лицензия сторонних компонентов (libmpv, LGPL-2.1)
     crates/kino-core/CRATE.md      доменные типы, трейт провайдера
     crates/kino-api/CRATE.md       HTTP-клиент, зеркала, парсинг, деобфускация
     crates/kino-ipc/CRATE.md       сервисный слой для окна входа (AppService, DTO)
