@@ -17,15 +17,26 @@ impl Player {
     }
 
     /// Переключает качество, сохраняя текущую позицию воспроизведения: запоминает `position()`
-    /// перед загрузкой нового файла и восстанавливает её после, если файл её поддерживает
-    /// (для `None`, например пока позиция ещё не известна, перематывание не выполняется).
+    /// до загрузки нового файла и передаёт её как per-file опцию `start=` самой команде
+    /// `loadfile` (а не отдельным `seek_to` после) — `loadfile` асинхронна (возвращается до того,
+    /// как новый файл фактически загрузится), поэтому немедленный `seek` после неё почти всегда
+    /// получает `MPV_ERROR_COMMAND` (нет текущего файла, которому можно сказать "перематывай"),
+    /// а `start=` применяется самим mpv, когда файл будет готов.
+    /// Для `None` (например пока позиция ещё не известна) опция не передаётся.
     pub fn switch_quality(&self, quality: &StreamQuality) -> libmpv2::Result<()> {
         let position = self.position()?;
-        self.load_quality(quality)?;
-        if let Some(position) = position {
-            self.seek_to(position)?;
+        match position {
+            Some(position) => self.mpv().command(
+                "loadfile",
+                &[
+                    quality.url.as_str(),
+                    "replace",
+                    "-1",
+                    &format!("start={position}"),
+                ],
+            ),
+            None => self.load_quality(quality),
         }
-        Ok(())
     }
 
     /// Добавляет внешнюю дорожку субтитров (`sub-add`) к уже загруженному файлу.
