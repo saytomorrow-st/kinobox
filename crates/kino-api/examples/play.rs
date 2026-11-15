@@ -230,7 +230,7 @@ async fn main() -> ExitCode {
     }
 
     let api = HdrezkaApi::new(client, mirror);
-    let mut details = match api.details_at(&args.url).await {
+    let details = match api.details_at(&args.url).await {
         Ok(details) => details,
         Err(err) => {
             eprintln!("{}", describe(&err));
@@ -238,25 +238,17 @@ async fn main() -> ExitCode {
         }
     };
 
-    // `--translator` выдвигает выбранный перевод на первое место: провайдер
-    // берёт перевод по умолчанию именно из начала списка.
     if let Some(id) = args.translator {
-        match details
-            .translators
-            .iter()
-            .position(|translator| translator.id == id)
-        {
-            Some(position) => details.translators.swap(0, position),
-            None => {
-                eprintln!("перевод {id} не найден");
-                return ExitCode::from(2);
-            }
+        if !details.translators.iter().any(|t| t.id == id) {
+            eprintln!("перевод {id} не найден");
+            return ExitCode::from(2);
         }
     }
 
     if details.seasons.is_empty() {
-        // Фильм: потоки лежат в данных плеера на странице.
-        return match api.streams(&details, None).await {
+        // Фильм: потоки лежат в данных плеера на странице; выбор другого перевода не
+        // реализован, `--translator` проверяется только на совпадение со страницей.
+        return match api.streams(&details, args.translator, None).await {
             Ok(qualities) => print_streams(&qualities, args.quality),
             Err(err) => {
                 eprintln!("{}", describe(&err));
@@ -298,7 +290,7 @@ async fn main() -> ExitCode {
         }
     };
 
-    match api.streams(&details, Some(selected)).await {
+    match api.streams(&details, args.translator, Some(selected)).await {
         Ok(qualities) => print_streams(&qualities, args.quality),
         Err(err) => {
             eprintln!("{}", describe(&err));

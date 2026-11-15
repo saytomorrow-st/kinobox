@@ -39,11 +39,16 @@ pub trait KinoProvider: Send + Sync {
         -> impl Future<Output = Result<Vec<Episode>>> + Send;
 
     /// Потоки уже после деобфускации, не сырая строка сайта. Для фильма `episode`
-    /// — `None`, для сериала — выбранная серия. Может вернуть `NotFound`, `Parse`,
-    /// `Deobfuscation` и `AuthRequired`.
+    /// — `None`, для сериала — выбранная серия. `translator_id` — `None` берёт перевод
+    /// по умолчанию (`details.translators[0]`); `Some(id)` должен быть среди
+    /// `details.translators`, иначе `Parse`. Для фильма (`episode = None`) выбор другого
+    /// перевода не реализован (нужен `action=get_movie`, см. `ARCHITECTURE.md`) — `Some(id)`,
+    /// отличный от перевода встроенных на странице данных плеера, тоже даёт `Parse`.
+    /// Может вернуть `NotFound`, `Parse`, `Deobfuscation` и `AuthRequired`.
     fn streams(
         &self,
         details: &MediaDetails,
+        translator_id: Option<u64>,
         episode: Option<&Episode>,
     ) -> impl Future<Output = Result<Vec<StreamQuality>>> + Send;
 }
@@ -171,13 +176,18 @@ mod tests {
         async fn streams(
             &self,
             details: &MediaDetails,
+            translator_id: Option<u64>,
             _episode: Option<&Episode>,
         ) -> Result<Vec<StreamQuality>> {
-            if details.item.id == self.details.item.id {
-                Ok(self.qualities.clone())
-            } else {
-                Err(KinoError::NotFound)
+            if details.item.id != self.details.item.id {
+                return Err(KinoError::NotFound);
             }
+            if let Some(id) = translator_id {
+                if !details.translators.iter().any(|t| t.id == id) {
+                    return Err(KinoError::Parse("перевод не найден".to_string()));
+                }
+            }
+            Ok(self.qualities.clone())
         }
     }
 
@@ -242,12 +252,22 @@ mod tests {
 
         let episode = provider.episodes[0].clone();
         assert_eq!(
-            pollster::block_on(provider.streams(&provider.details, Some(&episode))).unwrap(),
+            pollster::block_on(provider.streams(&provider.details, None, Some(&episode))).unwrap(),
             provider.qualities
         );
         assert_eq!(
-            pollster::block_on(provider.streams(&provider.details, None)).unwrap(),
+            pollster::block_on(provider.streams(&provider.details, None, None)).unwrap(),
             provider.qualities
+        );
+        let translator_id = provider.details.translators[0].id;
+        assert_eq!(
+            pollster::block_on(provider.streams(&provider.details, Some(translator_id), None))
+                .unwrap(),
+            provider.qualities
+        );
+        assert_eq!(
+            pollster::block_on(provider.streams(&provider.details, Some(999), None)),
+            Err(KinoError::Parse("перевод не найден".to_string()))
         );
     }
 
@@ -257,8 +277,8 @@ mod tests {
         let episode = provider.episodes[0].clone();
         assert_send(&provider.search("x"));
         assert_send(&provider.episodes(&provider.details));
-        assert_send(&provider.streams(&provider.details, None));
-        assert_send(&provider.streams(&provider.details, Some(&episode)));
+        assert_send(&provider.streams(&provider.details, None, None));
+        assert_send(&provider.streams(&provider.details, None, Some(&episode)));
     }
 
     #[test]
