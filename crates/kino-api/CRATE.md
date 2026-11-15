@@ -455,14 +455,20 @@ pub fn parse_episodes_html(html: &str, season_id: u32) -> Result<Vec<Episode>>;
 - `episodes(&MediaDetails)`: для фильма (`seasons` пусто) — `Ok(vec![])`; иначе
   берёт перевод по умолчанию (`details.translators[0]`), вызывает `episodes_list`,
   складывает серии всех сезонов и сортирует по `(season_id, episode_id)`.
-- `streams(&MediaDetails, Option<&Episode>)`: для фильма (`episode = None`)
-  извлекает `PlayerData` из `MediaDetails::raw_html` и деобфусцирует `streams`
-  без AJAX — данные перевода по умолчанию уже лежат на странице. Для сериала —
-  `stream_url` с `post_id`, `translator_id` и `(season_id, episode_id)` серии.
+- `streams(&MediaDetails, Option<u64>, Option<&Episode>)`: `translator_id`
+  резолвится через `resolve_translator_id` — `None` берёт первый перевод
+  (`details.translators[0]`), `Some(id)` должен быть среди `details.translators`
+  иначе `Parse`. Для фильма (`episode = None`) извлекает `PlayerData` из
+  `MediaDetails::raw_html` и деобфусцирует `streams` без AJAX — данные перевода
+  по умолчанию уже лежат на странице; если резолвленный перевод не совпадает с
+  `player.translator_id` страницы — `Parse` (выбор другого перевода для фильма не
+  реализован). Для сериала — `stream_url` с `post_id`, резолвленным `translator_id`
+  и `(season_id, episode_id)` серии.
 
 Для фильма можно обойтись без AJAX, только если `"streams"` на странице непустой;
 другой перевод для фильма через AJAX не реализован (нужен `action=get_movie`
-с другим `translator_id`).
+с другим `translator_id`) — запрос с переводом, отличным от того что на странице,
+просто возвращает `Parse`, а не тихо игнорируется.
 
 Пример запуска (реальные запросы; для сериала без `--season`/`--episode`
 печатается список серий и код 2):

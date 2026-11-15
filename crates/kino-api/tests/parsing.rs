@@ -80,7 +80,7 @@ async fn film_streams_from_real_fixture() {
     let api = HdrezkaApi::new(client, Url::parse("https://kvk.pub/").expect("url"));
 
     let qualities = api
-        .streams(&details, None)
+        .streams(&details, None, None)
         .await
         .expect("потоки фильма должны разобраться");
 

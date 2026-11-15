@@ -7,12 +7,12 @@ use kino_api::{
 };
 use serde::Serialize;
 use url::Url;
-use wiremock::matchers::{method, path};
+use wiremock::matchers::{body_string, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use crate::{
     AppService, BootState, EpisodeDto, IpcError, IpcErrorKind, MediaDetailsDto, MediaItemDto,
-    MediaKindDto, MirrorDto, MirrorStateDto, UserDto,
+    MediaKindDto, MirrorDto, MirrorStateDto, StreamQualityDto, UserDto,
 };
 
 const PASSWORD: &str = "Zq9!pw-secret";
@@ -757,4 +757,97 @@ async fn episodes_for_movie_without_seasons_skips_network() {
 
     assert!(episodes.is_empty());
     assert_eq!(hits(&server).await, 0);
+}
+
+#[tokio::test]
+async fn streams_for_series_episode_delegates_to_provider() {
+    let series_page =
+        answering(ResponseTemplate::new(200).set_body_string(series_details_html(7))).await;
+    let plain = "[720p]https://cdn.example.com/720.mp4";
+    let obfuscated = format!(
+        "#h{}",
+        base64::Engine::encode(&base64::engine::general_purpose::STANDARD, plain)
+    );
+    let body = format!(r#"{{"success":true,"url":"{obfuscated}"}}"#);
+    Mock::given(method("POST"))
+        .and(path("/ajax/get_cdn_series/"))
+        .and(body_string(
+            "id=7&translator_id=111&action=get_stream&season=1&episode=2",
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_string(body))
+        .mount(&series_page)
+        .await;
+    let service = service(&[&series_page]).await;
+    service.pool.store().set_active(base(&series_page)).await;
+    let item = series_item(7, &series_page);
+    let episode = EpisodeDto {
+        season_id: 1,
+        episode_id: 2,
+        title: "2 серия".to_string(),
+    };
+
+    let streams = service
+        .streams(item, None, Some(episode))
+        .await
+        .expect("потоки");
+
+    assert_eq!(
+        streams,
+        vec![StreamQualityDto {
+            label: "720p".to_string(),
+            url: "https://cdn.example.com/720.mp4".to_string(),
+            premium: false,
+            hls: None,
+            fallbacks: vec![],
+        }]
+    );
+}
+
+/// Страница деталей фильма с данными плеера (`initCDNMoviesEvents`): потоки фильма берутся
+/// из `raw_html`, который `streams` получает, перезапросив детали внутри.
+fn movie_details_html(id: u64) -> String {
+    format!(
+        r#"<input id="post_id" value="{id}">
+        <div class="b-post__title"><h1>Фильм {id}</h1></div>
+        <script>sof.tv.initCDNMoviesEvents({id}, 111, 0, 0, 0, 'kvk.pub', true, false,
+            {{"id":"cdnplayer","streams":"[720p]https://cdn.example.com/720.mp4","thumbnails":"/ajax/get_cdn_tiles/0/0/"}}
+        );</script>"#
+    )
+}
+
+fn movie_item(id: u64, server: &MockServer) -> MediaItemDto {
+    MediaItemDto {
+        id,
+        title: format!("Фильм {id}"),
+        original_title: None,
+        year: None,
+        kind: MediaKindDto::Movie,
+        poster_url: None,
+        page_url: format!("{}/films/{id}.html", server.uri()),
+        rating: None,
+    }
+}
+
+/// Фильм (`episode = None`) перезапрашивает детали внутри `streams` и деобфусцирует потоки
+/// из данных плеера страницы (`raw_html`) — успешный путь, без обхода сети.
+#[tokio::test]
+async fn streams_for_movie_uses_player_data_from_details_page() {
+    let server =
+        answering(ResponseTemplate::new(200).set_body_string(movie_details_html(85038))).await;
+    let service = service(&[&server]).await;
+    service.pool.store().set_active(base(&server)).await;
+    let item = movie_item(85038, &server);
+
+    let streams = service.streams(item, None, None).await.expect("потоки");
+
+    assert_eq!(
+        streams,
+        vec![StreamQualityDto {
+            label: "720p".to_string(),
+            url: "https://cdn.example.com/720.mp4".to_string(),
+            premium: false,
+            hls: None,
+            fallbacks: vec![],
+        }]
+    );
 }

@@ -98,7 +98,7 @@ pub trait KinoProvider: Send + Sync {
         -> impl Future<Output = Result<MediaDetails>> + Send;
     fn episodes(&self, details: &MediaDetails)
         -> impl Future<Output = Result<Vec<Episode>>> + Send;
-    fn streams(&self, details: &MediaDetails, episode: Option<&Episode>)
+    fn streams(&self, details: &MediaDetails, translator_id: Option<u64>, episode: Option<&Episode>)
         -> impl Future<Output = Result<Vec<StreamQuality>>> + Send;
 }
 ```
@@ -116,7 +116,7 @@ generic-параметр.
 | `catalog` | `Parse`; страницы нумеруются с 1 |
 | `details` | `NotFound`, `Parse` |
 | `episodes` | `NotFound`, `Parse`; для фильма (`seasons` пусто) — `Ok(vec![])`; берёт перевод по умолчанию из `details.translators[0]`, возвращает плоский список [`Episode`] всех сезонов |
-| `streams` | `NotFound`, `Parse`, `Deobfuscation`, `AuthRequired`; для фильма `episode = None` (потоки из данных плеера на странице), для сериала — выбранная [`Episode`]; возвращает [`StreamQuality`] после деобфускации |
+| `streams` | `NotFound`, `Parse`, `Deobfuscation`, `AuthRequired`; для фильма `episode = None` (потоки из данных плеера на странице), для сериала — выбранная [`Episode`]; `translator_id: None` — перевод по умолчанию (`translators[0]`), `Some(id)` должен быть среди `details.translators` иначе `Parse`; для фильма выбор другого перевода не реализован — `Some(id)`, отличный от перевода встроенного в страницу, тоже даёт `Parse`; возвращает [`StreamQuality`] после деобфускации |
 
 ## Соглашения
 

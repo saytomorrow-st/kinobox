@@ -3,7 +3,9 @@
 use std::time::Duration;
 
 use kino_api::{MirrorState, MirrorStatus, ResolvedMirror};
-use kino_core::{Episode, MediaDetails, MediaItem, MediaKind, Season, Translator, UserSession};
+use kino_core::{
+    Episode, MediaDetails, MediaItem, MediaKind, Season, StreamQuality, Translator, UserSession,
+};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use specta_typescript::Number;
@@ -228,6 +230,14 @@ impl From<&Translator> for TranslatorDto {
     }
 }
 
+/// Идентификатор перевода HDrezka для команд, принимающих `Option`-идентификатор.
+/// Как и `TranslatorDto::id`, экспортируется в TypeScript как `number`: ID укладываются в
+/// JS-число (до 2^53-1), потерь точности нет. Обёртка нужна, потому что specta запрещает
+/// голый `u64`/`i64` в сигнатурах команд (см. «Specta и u64» в `CRATE.md`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
+#[serde(transparent)]
+pub struct TranslatorId(#[specta(type = Number)] pub u64);
+
 /// Сезон сериала: номер и список номеров серий.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
@@ -326,6 +336,79 @@ impl From<&Episode> for EpisodeDto {
             title: episode.title.clone(),
         }
     }
+}
+
+impl From<&EpisodeDto> for Episode {
+    fn from(episode: &EpisodeDto) -> Self {
+        Self {
+            season_id: episode.season_id,
+            episode_id: episode.episode_id,
+            title: episode.title.clone(),
+        }
+    }
+}
+
+/// Один вариант качества потока после деобфускации.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct StreamQualityDto {
+    pub label: String,
+    pub url: String,
+    pub premium: bool,
+    pub hls: Option<String>,
+    pub fallbacks: Vec<String>,
+}
+
+impl From<&StreamQuality> for StreamQualityDto {
+    fn from(quality: &StreamQuality) -> Self {
+        Self {
+            label: quality.label.clone(),
+            url: quality.url.to_string(),
+            premium: quality.premium,
+            hls: quality.hls.as_ref().map(ToString::to_string),
+            fallbacks: quality.fallbacks.iter().map(ToString::to_string).collect(),
+        }
+    }
+}
+
+impl StreamQualityDto {
+    /// Обратно в `StreamQuality`: `kino-ipc` получает только то, что сам отдал, поэтому адреса
+    /// считаются корректными. Используется `src-tauri` (#021) для загрузки потока в `kino-player`.
+    pub fn try_into_stream_quality(&self) -> Result<StreamQuality, IpcError> {
+        let url = Url::parse(&self.url)
+            .map_err(|_| IpcError::invalid_input("Некорректный адрес потока"))?;
+        let hls = match &self.hls {
+            Some(raw) => Some(
+                Url::parse(raw)
+                    .map_err(|_| IpcError::invalid_input("Некорректный HLS-манифест"))?,
+            ),
+            None => None,
+        };
+        let fallbacks = self
+            .fallbacks
+            .iter()
+            .map(|raw| {
+                Url::parse(raw)
+                    .map_err(|_| IpcError::invalid_input("Некорректный резервный адрес потока"))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(StreamQuality {
+            label: self.label.clone(),
+            url,
+            premium: self.premium,
+            hls,
+            fallbacks,
+        })
+    }
+}
+
+/// Снимок прогресса воспроизведения, который `src-tauri` эмиттит в окно `player-controls`.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PlayerProgressDto {
+    pub position: Option<f64>,
+    pub duration: Option<f64>,
+    pub paused: bool,
 }
 
 /// Те же зеркало: схема, хост и порт; путь и запрос не важны.
@@ -607,5 +690,100 @@ mod tests {
             json!({"seasonId": 1, "episodeId": 2, "title": "2 серия"})
         );
         roundtrip(&episode);
+    }
+
+    #[test]
+    fn episode_dto_round_trips_back_to_core() {
+        let episode = Episode {
+            season_id: 1,
+            episode_id: 2,
+            title: "2 серия".to_string(),
+        };
+        let dto = EpisodeDto::from(&episode);
+        assert_eq!(Episode::from(&dto), episode);
+    }
+
+    #[test]
+    fn stream_quality_dto_is_camel_case_and_round_trips_both_ways() {
+        let quality = StreamQuality {
+            label: "720p".to_string(),
+            url: Url::parse("https://cdn.example.com/720.mp4").unwrap(),
+            premium: false,
+            hls: Some(Url::parse("https://cdn.example.com/720.m3u8").unwrap()),
+            fallbacks: vec![Url::parse("https://cdn.example.com/720-b.mp4").unwrap()],
+        };
+        let dto = StreamQualityDto::from(&quality);
+        assert_eq!(
+            serde_json::to_value(&dto).unwrap(),
+            json!({
+                "label": "720p",
+                "url": "https://cdn.example.com/720.mp4",
+                "premium": false,
+                "hls": "https://cdn.example.com/720.m3u8",
+                "fallbacks": ["https://cdn.example.com/720-b.mp4"],
+            })
+        );
+        roundtrip(&dto);
+        assert_eq!(dto.try_into_stream_quality().unwrap(), quality);
+    }
+
+    #[test]
+    fn stream_quality_dto_rejects_bad_urls_on_the_way_back() {
+        let mut dto = StreamQualityDto::from(&StreamQuality {
+            label: "720p".to_string(),
+            url: Url::parse("https://cdn.example.com/720.mp4").unwrap(),
+            premium: false,
+            hls: None,
+            fallbacks: vec![],
+        });
+        dto.url = "не url".to_string();
+        let err = dto.try_into_stream_quality().unwrap_err();
+        assert_eq!(err.kind, IpcErrorKind::InvalidInput);
+
+        let mut dto = StreamQualityDto::from(&StreamQuality {
+            label: "720p".to_string(),
+            url: Url::parse("https://cdn.example.com/720.mp4").unwrap(),
+            premium: false,
+            hls: None,
+            fallbacks: vec![],
+        });
+        dto.hls = Some("не url".to_string());
+        let err = dto.try_into_stream_quality().unwrap_err();
+        assert_eq!(err.kind, IpcErrorKind::InvalidInput);
+
+        let mut dto = StreamQualityDto::from(&StreamQuality {
+            label: "720p".to_string(),
+            url: Url::parse("https://cdn.example.com/720.mp4").unwrap(),
+            premium: false,
+            hls: None,
+            fallbacks: vec![],
+        });
+        dto.fallbacks = vec!["не url".to_string()];
+        let err = dto.try_into_stream_quality().unwrap_err();
+        assert_eq!(err.kind, IpcErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn player_progress_dto_is_camel_case() {
+        let progress = PlayerProgressDto {
+            position: Some(12.5),
+            duration: Some(90.0),
+            paused: true,
+        };
+        assert_eq!(
+            serde_json::to_value(progress).unwrap(),
+            json!({"position": 12.5, "duration": 90.0, "paused": true})
+        );
+        roundtrip(&progress);
+
+        let empty = PlayerProgressDto {
+            position: None,
+            duration: None,
+            paused: false,
+        };
+        assert_eq!(
+            serde_json::to_value(empty).unwrap(),
+            json!({"position": null, "duration": null, "paused": false})
+        );
     }
 }

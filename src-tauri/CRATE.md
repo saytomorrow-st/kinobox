@@ -31,9 +31,31 @@ pub type Service = AppService<KeychainSecretStore, MemoryMirrorStore>;
 | `mirrors` / `check_mirrors` | `() -> Result<Vec<MirrorDto>, IpcError>` | без изменений |
 | `add_mirror` / `select_mirror` | `(url) -> Result<MirrorDto, IpcError>` | без изменений |
 | `quit` | `()` | `app.exit(0)` |
+| `streams` | `(item, translatorId, episode) -> Result<Vec<StreamQualityDto>, IpcError>` | раскрывает `Option<TranslatorId>` в `Option<u64>` (`.map(\|id\| id.0)`); детали перезапрашиваются внутри сервиса |
+| `player_load` | `(quality) -> Result<(), IpcError>` | открывает окно плеера, привязывает рендер, грузит качество как **новый файл** (`Player::load_quality`) — позиция не сохраняется |
+| `player_play` / `player_pause` | `() -> Result<(), IpcError>` | `Player::play` / `Player::pause` |
+| `player_seek` | `(seconds) -> Result<(), IpcError>` | `Player::seek_to` |
+| `player_set_quality` | `(quality) -> Result<(), IpcError>` | **сохраняет позицию** (`Player::switch_quality`), только когда плеер уже играет то же произведение |
+| `player_set_volume` | `(volume) -> Result<(), IpcError>` | `Player::set_volume` |
+| `player_stop` | `() -> Result<(), IpcError>` | закрывает окно `player`; очистка плеера происходит в обработчике события окна |
 
 Логика окон нигде не дублируется: обе точки входа (`boot`, `login`) используют `windows::enter_main`,
 а `logout` — `windows::enter_login`.
+
+### Плеер (`player_state.rs`, `commands.rs`)
+
+`WindowedPlayer` (владеющий `Player` + рендер-контекст) живёт в `PlayerState(Arc<Mutex<Option<WindowedPlayer>>>)`
+и реализует только `Send`, не `Sync` — поэтому состояние сериализуется `Mutex`. Он привязывается к `NSView`
+окна `player` на главном потоке (`run_on_main_thread` + `oneshot`), а очистка (`*lock = None`) происходит в
+обработчике события окна (`CloseRequested`/`Destroyed`) — снова на главном потоке, где доставляются события.
+Воспроизведение останавливается автоматически, утечек mpv/рендера нет.
+
+Фоновый поток прогресса (`start_progress_thread`) опрашивает события mpv (`next_event(0.1)`) и эмиттит снимок
+`PlayerProgressDto` в окно `player-controls` событием `player-progress` (сырой `tauri::Emitter::emit_to`,
+без tauri-specta — событие не входит в сигнатуры команд). Поток держит мьютекс на время `next_event`
+(≤ ~0.1 с), за это время команды `player_play`/`player_pause` могут кратко заблокироваться — осознанная
+цена за то, что `WindowedPlayer` (самоссылающаяся структура) нельзя поделить на `Arc`-части. Поток
+завершается сам, когда `shared` становится `None`.
 
 ## Окна и их жизненный цикл
 
@@ -62,6 +84,13 @@ pub type Service = AppService<KeychainSecretStore, MemoryMirrorStore>;
   первого показа.
 - `main`: 1280×800, минимум 960×600, `create: false` (не создаётся автоматически при старте —
   появляется только через `windows::enter_main`).
+- `player`: 1280×720, без системных украшений (`decorations: false`), `create: false` — окно **без
+  веб-контента**: в его `NSView` встраивается рендер `libmpv`. Создаётся через
+  `tauri::window::WindowBuilder::from_config` (unstable API), а не `WebviewWindowBuilder`, поэтому из
+  `Manager` его возвращает `get_window`, а `get_webview_window` — `None`.
+- `player-controls`: прозрачное окно поверх `player` (`parent: "player"`, `transparent: true`, `shadow:
+  false`), с веб-контентом — это UI-оверлей (кнопки play/pause/seek/качество/громкость). Открывается и
+  закрывается вместе с `player` (`open_player`/`close_player` и обработчик события окна).
 
 ### `macOSPrivateApi`
 
@@ -89,11 +118,19 @@ JSON-схемы команд. Повторный запуск детермини
 `#[specta(type = Option<Number>)]` — экспортируются в TS как `number`, сериализация serde остаётся
 `u64`. Обоснование и побочный эффект (точность до 2^53-1) описаны в `crates/kino-ipc/CRATE.md`.
 
+Для `streams` нужен `Option`-идентификатор перевода, а specta не пускает голый `u64` в аргумент
+команды — поэтому `kino-ipc` вводит newtype `TranslatorId(#[specta(type = Number)] u64)`
+(`#[serde(transparent)]`). В TS он рендерится как `export type TranslatorId = number`.
+
 ## Capabilities и CSP
 
 `capabilities/default.json` — минимальный набор прав: только команды приложения
-(`allow-boot`, `allow-login`, …) и `core:window:allow-start-dragging` (для перетаскивания окна без
-системной рамки через `data-tauri-drag-region`). Никаких плагинов `fs`/`shell`/`http`/`opener`.
+(`allow-boot`, `allow-login`, …, `allow-streams`, `allow-player-*`) и `core:window:allow-start-dragging`
+(для перетаскивания окна без системной рамки через `data-tauri-drag-region`). Никаких плагинов
+`fs`/`shell`/`http`/`opener`.
+
+Окна `player` и `player-controls` добавлены в массив `windows` этой capability, иначе Tauri не
+пропускал бы к ним IPC (включая событие `player-progress`).
 
 CSP в `tauri.conf.json` — строгий (`default-src 'self'`, без `unsafe-eval`); для `devCsp` допущен
 только `http://localhost:1420` (dev-сервер Vite).

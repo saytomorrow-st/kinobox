@@ -52,6 +52,22 @@ fn headless_player_has_no_position_before_load() {
     assert_eq!(player.duration().unwrap(), None);
 }
 
+/// `vo=libmpv` (нужен `render::PlayerRenderContext::attach`, #021) не должен мешать обычной
+/// загрузке и воспроизведению даже без привязанного render-контекста и окна: mpv просто не
+/// рисует кадры, но файл всё равно загружается и свойства читаются как обычно.
+#[test]
+fn windowed_player_without_render_context_still_loads_and_plays() {
+    let player = Player::windowed().expect("windowed mpv init");
+    player
+        .load_quality(&fixture_quality("test", "silence.wav"))
+        .unwrap();
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline && player.position().unwrap().is_none() {}
+    assert!(player.position().unwrap().is_some(), "файл не загрузился");
+    let _ = player.mpv_handle();
+}
+
 #[test]
 fn play_pause_toggle_playback_state() {
     let player = Player::headless().expect("headless mpv init");

@@ -10,7 +10,9 @@ mod events;
 mod mpv;
 pub mod render;
 mod source;
+mod windowed;
 
 pub use events::{EndReason, PlayerEvent};
 pub use mpv::Player;
 pub use render::{PlayerRenderContext, RenderError, WindowRenderTarget};
+pub use windowed::WindowedPlayer;

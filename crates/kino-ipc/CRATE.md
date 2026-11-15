@@ -5,8 +5,8 @@
 
 Реэкспортировано из корня крейта: `AppService`, `BootState`, `UserDto`, `MirrorDto`, `MirrorStateDto`,
 `MediaKindDto`, `MediaItemDto`, `MediaDetailsDto`, `TranslatorDto`, `SeasonDto`, `EpisodeDto`,
-`IpcError`, `IpcErrorKind`, `ClientConfig`, `MirrorConfig`, `KeychainSecretStore`, `MemorySecretStore`,
-`MemoryMirrorStore`.
+`StreamQualityDto`, `PlayerProgressDto`, `IpcError`, `IpcErrorKind`, `ClientConfig`, `MirrorConfig`,
+`KeychainSecretStore`, `MemorySecretStore`, `MemoryMirrorStore`.
 
 ## AppService
 
@@ -31,6 +31,7 @@ impl<S: SecretStore, M: MirrorStore> AppService<S, M> {
     pub async fn search(&self, query: String) -> Result<Vec<MediaItemDto>, IpcError>;
     pub async fn details(&self, item: MediaItemDto) -> Result<MediaDetailsDto, IpcError>;
     pub async fn episodes(&self, details: MediaDetailsDto) -> Result<Vec<EpisodeDto>, IpcError>;
+    pub async fn streams(&self, item: MediaItemDto, translator_id: Option<u64>, episode: Option<EpisodeDto>) -> Result<Vec<StreamQualityDto>, IpcError>;
 }
 ```
 
@@ -59,10 +60,14 @@ impl<S: SecretStore, M: MirrorStore> AppService<S, M> {
   в адресе), путь, запрос и фрагмент отбрасываются. Затем `add_manual` и, при успехе, сброс сессии и cookie, потому что
   куки привязаны к домену. Следующие `login` и `boot` идут на новом зеркале. При ошибке (в том числе `Challenge`)
   активное зеркало и сессия не меняются. Введённый адрес в текст ошибки не попадает.
-- `catalog`, `search`, `details`, `episodes`: тонкий слой над `kino_core::KinoProvider`, который реализует
+- `catalog`, `search`, `details`, `episodes`, `streams`: тонкий слой над `kino_core::KinoProvider`, который реализует
   `kino_api::HdrezkaApi` (`provider_impl.rs`). Логики парсинга или сети здесь нет — только выбор зеркала и
   конвертация DTO. Ошибки `KinoProvider` (включая `AuthRequired`, `NotFound` → `internal`) идут через обычный
   `From<KinoError> for IpcError`.
+- `streams` принимает `item: MediaItemDto` (не `MediaDetailsDto`) и **перезапрашивает детали внутри**
+  (`provider.details(&item)`): потокам фильма нужен `raw_html` страницы (данные плеера `initCDN...Events`),
+  а `MediaDetailsDto` его физически не несёт. `raw_html` остаётся в памяти и не сериализуется в сеть —
+  это осознанная цена одного лишнего сетевого запроса за каждый клик «смотреть».
 
 ### `HdrezkaApi` и активное зеркало
 
@@ -102,6 +107,8 @@ impl<S: SecretStore, M: MirrorStore> AppService<S, M> {
 | `TranslatorDto` | `{ id: number, name: string }` |
 | `SeasonDto` | `{ number, episodes: number[] }` |
 | `EpisodeDto` | `{ seasonId, episodeId, title }` |
+| `StreamQualityDto` | `{ label, url, premium, hls: string \| null, fallbacks: string[] }`. `try_into_stream_quality` разбирает адреса обратно в `StreamQuality` и возвращает `InvalidInput` на испорченный URL — использует `src-tauri` (#021) для загрузки потока в `kino-player` |
+| `PlayerProgressDto` | `{ position: number \| null, duration: number \| null, paused: boolean }` — снимок прогресса, который `src-tauri` эмиттит в окно `player-controls` событием `player-progress` |
 | `IpcError` | `{ kind: IpcErrorKind, message: string }`, реализует `Display` и `std::error::Error` |
 | `IpcErrorKind` | `invalidInput`, `loginRejected`, `authRequired`, `challenge`, `network`, `keychain`, `noMirrors`, `internal` |
 
@@ -153,5 +160,7 @@ cargo test -p kino-ipc
 и JSON, форма JSON у `BootState`, `MirrorDto`, `IpcError`. Для каталога: `catalog`/`search`/`details`/`episodes`
 на активном и на не выбранном зеркале (авторезолв), `NoMirrors` без рабочих зеркал, пустой поиск без запроса,
 отказ `details` на невалидном `MediaItemDto` без похода в сеть, `episodes` для фильма без сезонов без похода
-в сеть, а также DTO-тесты в `dto.rs`: форма JSON (`camelCase`), оба направления конвертации `MediaItemDto`/
-`MediaDetailsDto`, и явная проверка, что `MediaDetailsDto` физически не содержит `raw_html`.
+в сеть. Для потоков: `streams` для серии (мокаются и страница деталей, и `get_stream`) и `streams` для фильма
+(перезапрос деталей внутри и деобфускация из данных плеера `initCDNMoviesEvents`). А также DTO-тесты в `dto.rs`:
+форма JSON (`camelCase`), оба направления конвертации `MediaItemDto`/`MediaDetailsDto`/`StreamQualityDto`,
+и явная проверка, что `MediaDetailsDto` физически не содержит `raw_html`.

@@ -2306,6 +2306,7 @@ dependencies = [
 name = "kino-ipc"
 version = "0.1.0"
 dependencies = [
+ "base64 0.23.1",
  "futures-util",
  "kino-api",
  "kino-core",
@@ -2344,12 +2345,15 @@ dependencies = [
 name = "kinobox-app"
 version = "0.1.0"
 dependencies = [
+ "kino-core",
  "kino-ipc",
+ "kino-player",
  "specta",
  "specta-typescript",
  "tauri",
  "tauri-build",
  "tauri-specta",
+ "tokio",
 ]
 
 [[package]]
