@@ -3,8 +3,8 @@
 use std::sync::{Arc, Mutex};
 
 use kino_ipc::{
-    BootState, EpisodeDto, IpcError, MediaItemDto, MirrorDto, PlayerProgressDto, StreamQualityDto,
-    TranslatorId, UserDto,
+    BootState, EpisodeDto, IpcError, MediaDetailsDto, MediaItemDto, MediaKindDto, MirrorDto,
+    PlayerProgressDto, StreamQualityDto, TranslatorId, UserDto,
 };
 use kino_player::{PlayerEvent, WindowRenderTarget, WindowedPlayer};
 use tauri::{AppHandle, Emitter, State, Window};
@@ -89,6 +89,43 @@ pub async fn select_mirror(
 #[specta::specta]
 pub fn quit(app: AppHandle) {
     app.exit(0);
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn catalog(
+    service: State<'_, Service>,
+    kind: Option<MediaKindDto>,
+    page: u32,
+) -> Result<Vec<MediaItemDto>, IpcError> {
+    service.catalog(kind, page).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn search(
+    service: State<'_, Service>,
+    query: String,
+) -> Result<Vec<MediaItemDto>, IpcError> {
+    service.search(query).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn details(
+    service: State<'_, Service>,
+    item: MediaItemDto,
+) -> Result<MediaDetailsDto, IpcError> {
+    service.details(item).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn episodes(
+    service: State<'_, Service>,
+    details: MediaDetailsDto,
+) -> Result<Vec<EpisodeDto>, IpcError> {
+    service.episodes(details).await
 }
 
 /// Потоки уже после деобфускации. `translator_id = None` — перевод по умолчанию; `episode`

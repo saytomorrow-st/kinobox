@@ -18,6 +18,10 @@ export const commands = {
 	addMirror: (url: string, options?: InvokeOptions) => typedError<MirrorDto, IpcError>(__TAURI_INVOKE("add_mirror", { url }, options)),
 	selectMirror: (url: string, options?: InvokeOptions) => typedError<MirrorDto, IpcError>(__TAURI_INVOKE("select_mirror", { url }, options)),
 	quit: (options?: InvokeOptions) => __TAURI_INVOKE<void>("quit", undefined, options),
+	catalog: (kind: MediaKindDto | null, page: number, options?: InvokeOptions) => typedError<MediaItemDto[], IpcError>(__TAURI_INVOKE("catalog", { kind, page }, options)),
+	search: (query: string, options?: InvokeOptions) => typedError<MediaItemDto[], IpcError>(__TAURI_INVOKE("search", { query }, options)),
+	details: (item: MediaItemDto, options?: InvokeOptions) => typedError<MediaDetailsDto, IpcError>(__TAURI_INVOKE("details", { item }, options)),
+	episodes: (details: MediaDetailsDto, options?: InvokeOptions) => typedError<EpisodeDto[], IpcError>(__TAURI_INVOKE("episodes", { details }, options)),
 	/**
 	 *  Потоки уже после деобфускации. `translator_id = None` — перевод по умолчанию; `episode`
 	 *  задаётся только для сериала. Детали перезапрашиваются внутри сервиса (`raw_html` по IPC
@@ -68,6 +72,18 @@ export type IpcError = {
 
 export type IpcErrorKind = "invalidInput" | "loginRejected" | "authRequired" | "challenge" | "network" | "keychain" | "noMirrors" | "internal";
 
+/**  Подробная карточка произведения. `rawHtml` ядра сюда не попадает: поле отсутствует
+ *  как таковое (см. `media_details_dto_has_no_raw_html_field`). */
+export type MediaDetailsDto = {
+	item: MediaItemDto,
+	description: string | null,
+	genres: string[],
+	countries: string[],
+	durationMinutes: number | null,
+	translators: TranslatorDto[],
+	seasons: SeasonDto[],
+};
+
 /**  Карточка произведения в каталоге, поиске или избранном. */
 export type MediaItemDto = {
 	id: number,
@@ -95,6 +111,12 @@ export type MirrorDto = {
 
 export type MirrorStateDto = "unknown" | "open" | "needsLogin" | "challenge" | "dead";
 
+/**  Сезон сериала: номер и список номеров серий. */
+export type SeasonDto = {
+	number: number,
+	episodes: number[],
+};
+
 /**  Один вариант качества потока после деобфускации. */
 export type StreamQualityDto = {
 	label: string,
@@ -102,6 +124,12 @@ export type StreamQualityDto = {
 	premium: boolean,
 	hls: string | null,
 	fallbacks: string[],
+};
+
+/**  Перевод (озвучка), доступный для произведения. */
+export type TranslatorDto = {
+	id: number,
+	name: string,
 };
 
 /**
