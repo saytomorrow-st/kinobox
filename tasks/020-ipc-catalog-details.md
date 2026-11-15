@@ -62,4 +62,5 @@ created: 2026-11-15
   `cargo test -p kino-ipc` (44 passed), `cargo check --target aarch64-apple-darwin`/
   `x86_64-apple-darwin` — все зелёные. `kino-player`/`kino-store` unused-dependency warnings в
   clippy предсуществующие (пустые крейты-заглушки), не из этой задачи.
-- PR #20, база — `docs/m3-plan`.
+- PR #20, база — `docs/m3-plan`. CI на PR #20 прогнан и проверен лично (`gh pr checks 20`):
+  `ui` 22с, `bindings` 4м0с, `rust` 19м17с — все три job зелёные.
