@@ -3,12 +3,14 @@ import {
   commands,
   type BootState,
   type IpcError,
+  type MediaItemDto,
+  type MediaKindDto,
   type MirrorDto,
   type MirrorStateDto,
   type UserDto,
 } from "./bindings";
 
-export type { BootState, IpcError, MirrorDto, MirrorStateDto, UserDto };
+export type { BootState, IpcError, MediaItemDto, MediaKindDto, MirrorDto, MirrorStateDto, UserDto };
 
 export type Outcome<T> = { ok: true; value: T } | { ok: false; error: IpcError };
 
@@ -21,6 +23,8 @@ export interface Api {
   checkMirrors(): Promise<Outcome<MirrorDto[]>>;
   addMirror(url: string): Promise<Outcome<MirrorDto>>;
   selectMirror(url: string): Promise<Outcome<MirrorDto>>;
+  catalog(kind: MediaKindDto | null, page: number): Promise<Outcome<MediaItemDto[]>>;
+  search(query: string): Promise<Outcome<MediaItemDto[]>>;
   quit(): Promise<void>;
 }
 
@@ -69,6 +73,8 @@ export const tauriApi: Api = {
   checkMirrors: () => call(() => commands.checkMirrors()),
   addMirror: (url) => call(() => commands.addMirror(url)),
   selectMirror: (url) => call(() => commands.selectMirror(url)),
+  catalog: (kind, page) => call(() => commands.catalog(kind, page)),
+  search: (query) => call(() => commands.search(query)),
   quit: async () => {
     try {
       await commands.quit();
