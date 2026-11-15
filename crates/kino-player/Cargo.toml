@@ -8,3 +8,16 @@ license.workspace = true
 
 [dependencies]
 kino-core.workspace = true
+url.workspace = true
+libmpv2 = "=7.0.1"
+raw-window-handle = { version = "=0.6.2", features = ["std"] }
+thiserror.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "=0.6.5"
+objc2-app-kit = { version = "=0.3.2", default-features = false, features = [
+    "std",
+    "NSOpenGL",
+    "NSResponder",
+    "NSView",
+] }
