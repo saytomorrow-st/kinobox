@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-episodes"
+description = "Enables the episodes command without any pre-configured scope."
+commands.allow = ["episodes"]
+
+[[permission]]
+identifier = "deny-episodes"
+description = "Denies the episodes command without any pre-configured scope."
+commands.deny = ["episodes"]

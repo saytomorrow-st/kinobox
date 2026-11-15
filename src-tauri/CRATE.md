@@ -31,6 +31,10 @@ pub type Service = AppService<KeychainSecretStore, MemoryMirrorStore>;
 | `mirrors` / `check_mirrors` | `() -> Result<Vec<MirrorDto>, IpcError>` | без изменений |
 | `add_mirror` / `select_mirror` | `(url) -> Result<MirrorDto, IpcError>` | без изменений |
 | `quit` | `()` | `app.exit(0)` |
+| `catalog` | `(kind, page) -> Result<Vec<MediaItemDto>, IpcError>` | без изменений |
+| `search` | `(query) -> Result<Vec<MediaItemDto>, IpcError>` | без изменений |
+| `details` | `(item) -> Result<MediaDetailsDto, IpcError>` | без изменений |
+| `episodes` | `(details) -> Result<Vec<EpisodeDto>, IpcError>` | без изменений |
 | `streams` | `(item, translatorId, episode) -> Result<Vec<StreamQualityDto>, IpcError>` | раскрывает `Option<TranslatorId>` в `Option<u64>` (`.map(\|id\| id.0)`); детали перезапрашиваются внутри сервиса |
 | `player_load` | `(quality) -> Result<(), IpcError>` | открывает окно плеера, привязывает рендер, грузит качество как **новый файл** (`Player::load_quality`) — позиция не сохраняется |
 | `player_play` / `player_pause` | `() -> Result<(), IpcError>` | `Player::play` / `Player::pause` |
@@ -125,7 +129,8 @@ JSON-схемы команд. Повторный запуск детермини
 ## Capabilities и CSP
 
 `capabilities/default.json` — минимальный набор прав: только команды приложения
-(`allow-boot`, `allow-login`, …, `allow-streams`, `allow-player-*`) и `core:window:allow-start-dragging`
+(`allow-boot`, `allow-login`, …, `allow-catalog`, `allow-search`, `allow-details`, `allow-episodes`,
+`allow-streams`, `allow-player-*`) и `core:window:allow-start-dragging`
 (для перетаскивания окна без системной рамки через `data-tauri-drag-region`). Никаких плагинов
 `fs`/`shell`/`http`/`opener`.
 
