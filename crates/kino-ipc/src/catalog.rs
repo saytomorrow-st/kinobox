@@ -1,10 +1,10 @@
-//! Каталог, поиск, детали и серии. Тонкий слой над `KinoProvider`: вся логика парсинга и
+//! Каталог, поиск, детали, серии и потоки. Тонкий слой над `KinoProvider`: вся логика парсинга и
 //! сети — в `kino-api`, здесь только DTO и выбор зеркала.
 
 use kino_api::{MirrorStore, SecretStore};
-use kino_core::{CatalogQuery, KinoProvider};
+use kino_core::{CatalogQuery, Episode, KinoProvider};
 
-use crate::dto::{EpisodeDto, MediaDetailsDto, MediaItemDto, MediaKindDto};
+use crate::dto::{EpisodeDto, MediaDetailsDto, MediaItemDto, MediaKindDto, StreamQualityDto};
 use crate::error::IpcError;
 use crate::service::AppService;
 
@@ -47,5 +47,28 @@ impl<S: SecretStore, M: MirrorStore> AppService<S, M> {
         let details = details.try_into_media_details()?;
         let episodes = provider.episodes(&details).await?;
         Ok(episodes.iter().map(EpisodeDto::from).collect())
+    }
+
+    /// Потоки уже после деобфускации для фильма (`episode = None`) или серии сериала
+    /// (`episode = Some`). `translator_id = None` — перевод по умолчанию. Субтитры этим
+    /// методом не возвращаются (`KinoProvider::streams` отдаёт только `Vec<StreamQuality>`).
+    ///
+    /// Детали перезапрашиваются внутри: для потоков фильма нужен `raw_html` страницы
+    /// (данные плеера), а `MediaDetailsDto` его физически не несёт. `raw_html` остаётся в
+    /// памяти и никогда не пересекает IPC — по сети он не сериализуется.
+    pub async fn streams(
+        &self,
+        item: MediaItemDto,
+        translator_id: Option<u64>,
+        episode: Option<EpisodeDto>,
+    ) -> Result<Vec<StreamQualityDto>, IpcError> {
+        let provider = self.provider().await?;
+        let item = item.try_into_media_item()?;
+        let details = provider.details(&item).await?;
+        let episode: Option<Episode> = episode.as_ref().map(Episode::from);
+        let streams = provider
+            .streams(&details, translator_id, episode.as_ref())
+            .await?;
+        Ok(streams.iter().map(StreamQualityDto::from).collect())
     }
 }

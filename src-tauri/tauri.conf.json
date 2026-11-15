@@ -44,6 +44,31 @@
         "theme": "Dark",
         "titleBarStyle": "Overlay",
         "hiddenTitle": true
+      },
+      {
+        "label": "player",
+        "title": "KinoBox Player",
+        "create": false,
+        "width": 1280,
+        "height": 720,
+        "resizable": true,
+        "decorations": false,
+        "visible": false,
+        "theme": "Dark"
+      },
+      {
+        "label": "player-controls",
+        "title": "KinoBox Player",
+        "create": false,
+        "parent": "player",
+        "width": 1280,
+        "height": 720,
+        "transparent": true,
+        "decorations": false,
+        "shadow": false,
+        "resizable": false,
+        "visible": false,
+        "focus": true
       }
     ],
     "security": {

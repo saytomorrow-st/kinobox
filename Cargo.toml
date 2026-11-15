@@ -29,7 +29,7 @@ futures-util = { version = "=0.3.34", default-features = false, features = ["all
 keyring = "=4.2.0"
 rpassword = "=7.5.5"
 scraper = { version = "=0.29.0", default-features = false }
-tauri = { version = "=2.12.5", default-features = false, features = ["wry", "compression", "macos-private-api"] }
+tauri = { version = "=2.12.5", default-features = false, features = ["wry", "compression", "macos-private-api", "unstable"] }
 tauri-build = "=2.7.4"
 tauri-specta = { version = "=2.0.0-rc.29", features = ["derive", "typescript"] }
 specta = { version = "=2.0.0-rc.28", features = ["derive", "function"] }
