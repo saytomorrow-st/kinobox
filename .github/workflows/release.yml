@@ -6,23 +6,55 @@ on:
       - 'v*'
 
 jobs:
+  # ---- Universal libmpv.dylib (#019) -------------------------------------
+  # Источник — официальные Homebrew-бутылки mpv по архитектурам: одна бутылка
+  # = одна архитектура, поэтому нужны два job'а (arm64 на macos-latest, x86_64
+  # на Intel-раннере macos-13), а universal-файлы сливаются через lipo уже на
+  # arm64-раннере до сборки бандла. Rosetta на arm64-раннере не даёт
+  # x86_64-бутылки в /usr/local, а сборка mpv из исходников на runner'е
+  # слишком долгая и хрупкая — поэтому готовые бутылки Homebrew.
+  # ------------------------------------------------------------------------
+  libmpv-x86_64:
+    runs-on: macos-13
+    steps:
+      - name: Install mpv (x86_64 bottle)
+        run: brew install mpv
+
+      - name: Show bottle architectures (diagnostics)
+        run: lipo -info "$(brew --prefix mpv)/lib/libmpv.2.dylib"
+
+      # Префикс копируем с -L (раскрыть симлинки): скрипту вендоринга нужны
+      # настоящие dylib-файлы в lib/, а не симлинки Homebrew.
+      - name: Stage x86_64 mpv prefix
+        run: |
+          mkdir -p "$RUNNER_TEMP/libmpv-x86_64"
+          cp -RL "$(brew --prefix mpv)" "$RUNNER_TEMP/libmpv-x86_64/mpv"
+
+      - name: Upload x86_64 mpv prefix
+        uses: actions/upload-artifact@v4
+        with:
+          name: libmpv-x86_64
+          path: ${{ runner.temp }}/libmpv-x86_64/mpv
+          retention-days: 3
+
   release:
     permissions:
       contents: write
+    needs: libmpv-x86_64
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 22
-      
+
       - name: Install pnpm
         uses: pnpm/action-setup@v3
         with:
           version: 9
-      
+
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -33,10 +65,79 @@ jobs:
         with:
           go-version: "1.22"
 
+      - name: Download x86_64 libmpv (from macos-13 job)
+        uses: actions/download-artifact@v4
+        with:
+          name: libmpv-x86_64
+          path: ${{ runner.temp }}/libmpv-x86_64
+
       - name: Install dependencies
         run: pnpm --dir ui install --frozen-lockfile
 
-      - name: Build Tauri app
+      # arm64-половина universal libmpv.dylib.
+      - name: Install mpv (arm64 bottle)
+        run: brew install mpv
+
+      # Почему сборка разбита так, а не одним `tauri build` с вендорингом внутри:
+      #   1. tauri-bundler УДАЛЯЕТ .app перед каждой сборкой
+      #      (fs::remove_dir_all(app_bundle_path)), поэтому всё, что лежит внутри
+      #      .app, живёт до следующей сборки бандла.
+      #   2. install_name_tool должен пройти ДО codesign, иначе правка ломает подпись.
+      #   3. bundled .app собирается копированием бинаря из cargo target dir
+      #      (copy_binaries_to_bundle), значит патчить надо именно источник в
+      #      target dir, а стейджинг dylib держать вне .app.
+      # Отсюда: бинарь собираем один раз, патчим его в target dir, dylib готовим
+      # в $RUNNER_TEMP, указываем на них через bundle.macOS.frameworks — и даём
+      # tauri-action собрать/подписать/упаковать бандл единственным проходом.
+
+      # Сборка бинаря в target dir без бандла: нам нужен только файл
+      # src-tauri/target/universal-apple-darwin/release/KinoBox для патча.
+      - name: Build universal binary (no bundle)
+        run: cargo tauri build --target universal-apple-darwin --no-bundle
+        working-directory: src-tauri
+
+      # lipo + install_name_tool: universal dylib-ы в стейджинг-каталог ВНЕ .app,
+      # ссылки внутри них → @rpath. lipo -info и otool -L печатаются скриптом.
+      - name: Vendor universal libmpv (staging outside .app)
+        run: |
+          scripts/vendor-libmpv.sh \
+            "$(brew --prefix mpv)" \
+            "$RUNNER_TEMP/libmpv-x86_64/mpv" \
+            "$RUNNER_TEMP/vendored-libmpv"
+
+      # Патч бинаря В TARGET DIR (не внутри .app): LC_LOAD_DYLIB →
+      # @rpath/libmpv.2.dylib + LC_RPATH @executable_path/../Frameworks.
+      # Бандлер копирует этот файл в каждый новый .app, поэтому патч переживает
+      # любую пересборку бандла, включая ту, что делает tauri-action.
+      - name: Patch binary in cargo target dir
+        run: |
+          scripts/patch-app-binary.sh \
+            "src-tauri/target/universal-apple-darwin/release/KinoBox"
+
+      # bundle.macOS.frameworks — абсолютные пути к dylib в стейджинге (НЕ внутри
+      # .app). Список берём из .manifest, который пишет vendor-libmpv.sh.
+      - name: Write tauri.macos.conf.json (frameworks from staging)
+        run: |
+          set -euo pipefail
+          STAGE="$RUNNER_TEMP/vendored-libmpv"
+          {
+            echo '{"bundle":{"macOS":{"frameworks":['
+            first=1
+            while IFS= read -r name; do
+              [[ -n "$name" ]] || continue
+              [[ $first -eq 0 ]] && echo -n ","
+              echo -n "\"$STAGE/$name\""
+              first=0
+            done < "$STAGE/.manifest"
+            echo ']}}}'
+          } > src-tauri/tauri.macos.conf.json
+          cat src-tauri/tauri.macos.conf.json
+
+      # Единственный реальный проход сборки бандла: tauri-action вызывает
+      # `tauri build` (бинарь уже пропатчен, dylib подхватятся из
+      # tauri.macos.conf.json), подписывает .app вместе с вложенными dylib,
+      # собирает dmg и публикует релиз.
+      - name: Sign, bundle and publish
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -48,3 +149,19 @@ jobs:
           releaseDraft: false
           prerelease: false
           args: --target universal-apple-darwin
+
+      # Проверка итогового подписанного .app (tauri-action оставляет его на месте,
+      # dmg собирается из него). Живой запуск в CI невозможен, поэтому это
+      # единственная автоматическая гарантия самодостаточности бандла.
+      - name: Verify vendored libmpv
+        run: |
+          set -euo pipefail
+          APP=src-tauri/target/universal-apple-darwin/release/bundle/macos/KinoBox.app
+          lipo -info "$APP/Contents/Frameworks/libmpv.2.dylib"
+          otool -L "$APP/Contents/MacOS/KinoBox"
+          otool -l "$APP/Contents/MacOS/KinoBox" | grep -A2 LC_RPATH
+          if otool -L "$APP/Contents/MacOS/KinoBox" "$APP"/Contents/Frameworks/*.dylib \
+              | grep -E "/(opt/homebrew|usr/local)/"; then
+            echo "ERROR: absolute Homebrew paths survived bundling" >&2
+            exit 1
+          fi
