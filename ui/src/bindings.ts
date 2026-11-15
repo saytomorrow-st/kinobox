@@ -72,8 +72,10 @@ export type IpcError = {
 
 export type IpcErrorKind = "invalidInput" | "loginRejected" | "authRequired" | "challenge" | "network" | "keychain" | "noMirrors" | "internal";
 
-/**  Подробная карточка произведения. `rawHtml` ядра сюда не попадает: поле отсутствует
- *  как таковое (см. `media_details_dto_has_no_raw_html_field`). */
+/**
+ *  Подробная карточка произведения. `rawHtml` ядра сюда не попадает: поле отсутствует
+ *  как таковое (см. `media_details_dto_has_no_raw_html_field`).
+ */
 export type MediaDetailsDto = {
 	item: MediaItemDto,
 	description: string | null,
