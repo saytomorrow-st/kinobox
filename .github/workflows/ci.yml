@@ -28,7 +28,11 @@ jobs:
       - name: Install mpv (libmpv for kino-player)
         # HOMEBREW_NO_BUILD_FROM_SOURCE делает отсутствие готовой bottle явной ошибкой шага,
         # а не многочасовой компиляцией зависимостей (например llvm) из исходников на раннере.
-        run: HOMEBREW_NO_BUILD_FROM_SOURCE=1 brew install mpv
+        # `brew --prefix`/lib не входит в путь поиска `cc` по умолчанию — без LIBRARY_PATH
+        # линковка `-lmpv` падает с "library 'mpv' not found", хотя сама bottle установлена.
+        run: |
+          HOMEBREW_NO_BUILD_FROM_SOURCE=1 brew install mpv
+          echo "LIBRARY_PATH=$(brew --prefix)/lib:${LIBRARY_PATH:-}" >> "$GITHUB_ENV"
 
       - name: Cache cargo
         uses: actions/cache@v4
