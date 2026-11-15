@@ -1,7 +1,7 @@
 ---
 id: 018
 type: feature
-status: open
+status: review
 model: claude-sonnet-5
 crate: kino-player
 created: 2026-11-15
@@ -51,3 +51,15 @@ created: 2026-11-15
 процессе найдётся, что `raw-window-handle` из `tauri`/`wry` не даёт нужного уровня доступа (например
 не отдаёт `NSView` именно окна `player`, а только контейнер WKWebView) — остановиться и вернуться с
 вариантами, не изобретать обходы вслепую.
+
+Код написан, личная проверка пройдена: `cargo fmt --check`, `cargo clippy --workspace
+--all-targets -- -D warnings`, `cargo check --workspace` и оба target — все зелёные (включая
+юнит-тесты геометрии/хендлов из `render.rs`/`render/macos.rs`, но без реального рендера в живое
+окно — см. `CRATE.md`, раздел «Что проверено и что нет»). `cargo test -p kino-player` не
+запущен лично по той же причине, что в #017 (нет x86_64-bottle `mpv` на этой машине) — ждём
+CI (Apple Silicon раннер).
+
+Смержено с #017 в одном PR/коммите: обе задачи трогали `crates/kino-player/{lib.rs,Cargo.toml,
+CRATE.md}` в разных worktree (`/Users/saytomorrow/kinobox` и `/Users/saytomorrow/kinobox-wt-018`),
+слияние сделано вручную лид-агентом (`mod events; mod mpv; pub mod render; mod source;`
+в `lib.rs`, объединённый `Cargo.toml`/`CRATE.md`).

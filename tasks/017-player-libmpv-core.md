@@ -1,7 +1,7 @@
 ---
 id: 017
 type: feature
-status: open
+status: review
 model: claude-sonnet-5
 crate: kino-player
 created: 2026-11-15
@@ -45,5 +45,18 @@ created: 2026-11-15
 
 Зависит от #003 (`kino-core::stream`). Блокирует #018 (встраивание рендера в окно).
 
-CI (`.github/workflows/ci.yml`, job `rust`): нужно добавить шаг `brew install mpv` перед `Test`
-(после `Setup Go`), иначе `cargo test --workspace` не слинкуется. Это тоже часть этой задачи.
+CI (`.github/workflows/ci.yml`, job `rust`): добавлен шаг `brew install mpv` перед `Test`
+(после `Setup Go`), с `HOMEBREW_NO_BUILD_FROM_SOURCE=1` — CI-раннер `macos-latest` (Apple Silicon)
+имеет готовую bottle `mpv`, так что шаг не должен компилировать из исходников.
+
+Код написан, личная проверка пройдена: `cargo fmt --check`, `cargo clippy --workspace
+--all-targets -- -D warnings`, `cargo check --workspace` и оба target (`aarch64-apple-darwin`,
+`x86_64-apple-darwin`) — все зелёные. `cargo test -p kino-player` **не проверен лично**: на
+локальной машине (Intel Mac, macOS 13.7.8) у `mpv` нет x86_64-bottle в homebrew-core (только
+`arm64_*` и `*_linux`) — `brew install mpv` неизбежно собирает `llvm` из исходников (несколько
+часов), что запрещено. Подтверждение: `-lmpv` — единственная ошибка при `cargo test -p kino-player
+--no-run` (линковка, не компиляция). Тест зелёности подтвердит CI (Apple Silicon раннер, есть
+arm64-bottle).
+
+Смержено с #018 в одном PR/коммите (оба трогали `crates/kino-player/{lib.rs,Cargo.toml,CRATE.md}`
+в разных worktree) — см. `tasks/018-player-window-embedding.md`.
