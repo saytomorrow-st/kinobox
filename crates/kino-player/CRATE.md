@@ -6,7 +6,7 @@
 передаёт его `mpv_handle` в `PlayerRenderContext::attach`.
 
 Реэкспортировано из корня крейта: `Player`, `PlayerEvent`, `EndReason`,
-`WindowRenderTarget`, `PlayerRenderContext`, `RenderError`.
+`WindowRenderTarget`, `PlayerRenderContext`, `RenderError`, `WindowedPlayer`.
 
 ## Player (headless-ядро, #017)
 
@@ -210,6 +210,60 @@ GL-контекста на настоящем `NSView` и сам вызов `ren
 кадр действительно появляется в `NSView` окна `player`, что `view_size()`/масштаб к пикселям дают
 корректный результат на Retina-дисплее, и что `set_update_callback` реально вызывается при
 декодировании кадров libmpv.
+
+## `WindowedPlayer`: владеющая пара `Player` + `PlayerRenderContext` (#021)
+
+```rust
+pub struct WindowedPlayer { /* приватно */ }
+
+impl WindowedPlayer {
+    pub fn attach(target: WindowRenderTarget) -> Result<Self, RenderError>;
+    pub fn player(&self) -> &Player;
+    pub fn render_context(&self) -> &PlayerRenderContext<'static>;
+    pub fn render_context_mut(&mut self) -> &mut PlayerRenderContext<'static>;
+}
+```
+
+### Зачем нужен
+
+`PlayerRenderContext<'a>::attach` (выше) заимствует `&'a libmpv2::Mpv` из `Player`. `src-tauri`
+(#021) должно держать и `Player`, и привязанный к нему `PlayerRenderContext` вместе в одном
+`tauri::State` на всё время, пока открыто окно `player` — то есть именно в виде одной владеющей
+структуры, а не пары с явным параметром времени жизни (который было бы невозможно выразить для
+значения, создаваемого в рантейме уже после старта приложения). `WindowedPlayer::attach` создаёт
+`Player::windowed()`, кладёт его в `Box` и безопасно продлевает заимствование `&Mpv` до
+`'static` внутри одного `unsafe`-блока (единственного во всём крейте за пределами `render::macos`),
+обоснование и оба инварианта, которые делают это корректным — в комментарии модуля
+`src/windowed.rs`: `player` в `Box` (адрес на куче не меняется при перемещении самого
+`WindowedPlayer`) и порядок полей (`render_context` раньше `player`, Rust гарантированно дропает
+поля в порядке объявления — значит заимствование отпускается раньше, чем уходит сам `Player`).
+
+`attach` — атомарная операция: при ошибке привязки к окну (`RenderError`) уже созданный `Player`
+уничтожается вместе с ней, наружу не просачивается «голый» `Player` без рендера.
+
+### `WindowedPlayer: Send`, но не `Sync`
+
+`PlayerRenderContext` хранит на macOS `Retained<NSView>`/`Retained<NSOpenGLContext>` —
+`objc2`/`objc2-app-kit` намеренно не реализуют для них `Send`/`Sync`, потому что вызывать методы
+AppKit разрешено только с главного потока. Но `tauri::State`/`Manager::manage` (нужны `src-tauri`,
+#021, чтобы положить `Mutex<Option<WindowedPlayer>>` в управляемое состояние) требуют
+`T: Send + Sync + 'static` — для `Mutex<T>` это сводится к `T: Send`.
+
+Крейт даёт `unsafe impl Send for WindowedPlayer {}` (не `Sync`): перемещать владение
+`Retained<NSView>`/`Retained<NSOpenGLContext>` между потоками безопасно само по себе — опасность
+представляет не факт обладания указателем, а вызов AppKit-методов не с главного потока, а это
+`Send`/`Sync` в принципе не могут выразить (это свойство конкретного рантайма, не типа). Поэтому
+соблюдение инварианта «методы, трогающие `render_context` (`attach`, `render`, `view_size`,
+`set_update_callback`) — только с главного потока» остаётся обязанностью вызывающей стороны
+(`src-tauri`), не гарантируется типами этого крейта. Методы `Player` (`play`/`pause`/`seek_to`/
+`volume`/`load_quality`/...) трогают только `libmpv2::Mpv` (сам `Send + Sync`, гарантия
+`libmpv2`) и безопасны с любого потока без этой оговорки.
+
+### Что не покрыто тестом
+
+Как и `render::attach` — реальное создание `WindowedPlayer` требует живого `NSView`/главного
+потока (GUI), агенту запрещён. Корректность `unsafe`-блока проверена логически (комментарий
+модуля) и `cargo clippy`/`cargo check`, а не юнит-тестом.
 
 ## Зависимости
 
