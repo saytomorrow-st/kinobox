@@ -54,23 +54,39 @@ KinoBox — это десктопный клиент HDrezka API. Онлайн-�
 
 ## Маршрутизация моделей (решай сам, без вопроса)
 
+По умолчанию — максимум на аутсорс. Сам (lead-агент) пишешь только
+архитектурный клей и делаешь ревью; почти вся остальная работа, включая
+то, что раньше считалось «сложным» (player/libmpv, async, анимации),
+уходит subagent'ам на `deepseek-v4-pro`. `claude-sonnet-5`/`opus` — только
+для решений, которые меняют границы крейтов, или когда дешёвая модель
+застряла.
+
 | Задача | Модель | Уровень |
 |---|---|---|
-| Планирование, архитектура, дизайн-система | `claude-sonnet-5` | high |
-| Rust: async, tokio, retry, зеркала | `claude-sonnet-5` | medium |
-| Rust: player, HLS, libmpv | `claude-sonnet-5` | medium |
+| Архитектурные решения, меняющие границы крейтов | `claude-sonnet-5` | high |
+| Планирование спринта/milestone, дизайн-система | `deepseek-v4-pro` | medium |
+| Rust: async, tokio, retry, зеркала | `deepseek-v4-pro` | medium |
+| Rust: player, HLS, libmpv | `deepseek-v4-pro` | medium |
 | Rust: kino-api, парсинг, деобфускация | `deepseek-v4-pro` | medium |
-| UI: React, Tailwind, компоненты | `claude-sonnet-5` | medium |
-| UI: мелкие правки стилей | `deepseek-flash` | low |
-| Анимации, focus-навигация | `claude-sonnet-5` | high |
-| Тесты, фикстуры | `deepseek-flash` | low |
-| Boilerplate, типы, serde | `deepseek-flash` | low |
+| UI: React, Tailwind, компоненты | `deepseek-v4-pro` | medium |
+| UI: мелкие правки стилей | `deepseek-v4-flash` | low |
+| Анимации, focus-навигация | `deepseek-v4-pro` | medium |
+| Тесты, фикстуры | `deepseek-v4-flash` | low |
+| Boilerplate, типы, serde | `deepseek-v4-flash` | low |
 | SQLite схема + миграции | `glm-5.3-flash` | low |
-| CI, release.yml, updater, конфиги | `deepseek-flash` | low |
+| CI, release.yml, updater, конфиги | `deepseek-v4-flash` | low |
 | README, docs, changelog | `kimi-k3.1-pro` | low |
-| Ревью PR | `codex-auto-review` | low |
-| Anubis PoW, крипто-арифметика | `claude-opus-5-5` | high | 
+| Ревью PR (черновой проход) | `deepseek-v4-pro` | low |
+| Anubis PoW, крипто-арифметика | `claude-opus-5-5` | high |
 | Тяжёлые развилки (застрял >2 попыток) | `claude-opus-5-5` | high |
+
+Тесты и фикстуры — **всегда** `deepseek-v4-flash`, даже если фичу делала
+другая модель: отдельный subagent-проход только на тесты, не смешивать
+с реализацией.
+
+`codex-auto-review` и `deepseek-flash` — несуществующие ID, не использовать
+(верные: `deepseek-v4-pro`, `deepseek-v4-flash`). Финальное ревью PR всегда
+остаётся за lead-агентом (ты), даже если черновой проход сделал subagent.
 
 Делегирование: `subagent(agent: "general", model: "<модель>", prompt: "<задача + нужные файлы + ограничения>")`.
 Subagent получает свежий контекст — передавай ему выжимку, а не ссылку на контекст сеанса.
