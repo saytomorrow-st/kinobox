@@ -15,6 +15,8 @@ pub struct Player { /* приватно */ }
 
 impl Player {
     pub fn headless() -> libmpv2::Result<Self>;
+    pub fn windowed() -> libmpv2::Result<Self>;
+    pub fn mpv_handle(&self) -> &libmpv2::Mpv;
 
     pub fn play(&self) -> libmpv2::Result<()>;
     pub fn pause(&self) -> libmpv2::Result<()>;
@@ -39,8 +41,16 @@ impl Player {
 ### Создание
 
 `Player::headless()` создаёт `Mpv::with_initializer`, выставляя `vo=null` и `ao=null` до старта
-плеера. Никакого окна и звукового устройства при этом не требуется — для реального видеовыхода
-модуль `render` (ниже) встраивает рендер-контекст в окно отдельно, без изменения самого `Player`.
+плеера. Никакого окна и звукового устройства при этом не требуется — используется в тестах этого
+крейта.
+
+`Player::windowed()` выставляет `vo=libmpv` (звук — платформенный выбор mpv, не переопределяется):
+это обязательное условие для `render::PlayerRenderContext::attach` — без `vo=libmpv`,
+выставленного **до** старта mpv, `create_render_context` не создаёт OpenGL render-контекст (так же
+в примере `libmpv2` `examples/opengl.rs`). Поэтому `vo` нельзя сменить после `headless()` отдельным
+вызовом — нужен отдельный конструктор. `mpv_handle()` отдаёт `&libmpv2::Mpv` наружу: `src-tauri`
+(#021) создаёт `Player::windowed()`, получает хендл окна `player` и передаёт `player.mpv_handle()`
+в `PlayerRenderContext::attach` вместе с `WindowRenderTarget::new(window_handle)`.
 
 ### Воспроизведение
 

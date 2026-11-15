@@ -13,8 +13,8 @@ pub struct Player {
 
 impl Player {
     /// Создаёт плеер без видео- и аудиовыхода (`vo=null`, `ao=null`): не рисует окно, не требует
-    /// звукового устройства. Используется в тестах и как база для #018 (там видеовыход
-    /// переключается на render API после создания).
+    /// звукового устройства. Используется в тестах — для реального видеовыхода в окне (#021)
+    /// нужен [`Player::windowed`], не этот конструктор.
     pub fn headless() -> libmpv2::Result<Self> {
         let mpv = Mpv::with_initializer(|init| {
             init.set_option("vo", "null")?;
@@ -24,8 +24,30 @@ impl Player {
         Ok(Self { mpv })
     }
 
+    /// Создаёт плеер с видеовыходом через render API libmpv (`vo=libmpv`) и обычным звуковым
+    /// устройством (`ao` не переопределяется — платформенный выбор mpv). `vo=libmpv` обязателен
+    /// для [`crate::render::PlayerRenderContext::attach`]: без него `create_render_context`
+    /// возвращает ошибку, так же как без этой опции рисовать в собственный `NSView` окна
+    /// невозможно (см. пример `libmpv2` `examples/opengl.rs` — тот же `vo=libmpv` до создания
+    /// render-контекста). Нужно выставить до старта mpv, поэтому отдельный конструктор, а не
+    /// опция, которую можно сменить после `headless()`.
+    pub fn windowed() -> libmpv2::Result<Self> {
+        let mpv = Mpv::with_initializer(|init| {
+            init.set_option("vo", "libmpv")?;
+            Ok(())
+        })?;
+        Ok(Self { mpv })
+    }
+
     /// Доступ к внутреннему `Mpv` для модулей `events`/`source` этого крейта.
     pub(crate) fn mpv(&self) -> &Mpv {
+        &self.mpv
+    }
+
+    /// Публичный доступ к внутреннему `libmpv2::Mpv` — нужен `src-tauri` (#021), чтобы передать
+    /// хендл в [`crate::render::PlayerRenderContext::attach`] без протечки деталей `Player`
+    /// наружу иначе, чем через сам тип `Mpv` (уже часть публичного API `render`).
+    pub fn mpv_handle(&self) -> &Mpv {
         &self.mpv
     }
 
