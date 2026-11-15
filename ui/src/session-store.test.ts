@@ -15,6 +15,8 @@ function fakeApi(overrides: Partial<Api> = {}): Api {
     checkMirrors: async () => ({ ok: true, value: [] }),
     addMirror: async () => ({ ok: false, error: { kind: "internal", message: "не вызывается" } }),
     selectMirror: async () => ({ ok: false, error: { kind: "internal", message: "не вызывается" } }),
+    catalog: async () => ({ ok: true, value: [] }),
+    search: async () => ({ ok: true, value: [] }),
     quit: async () => {},
     ...overrides,
   };

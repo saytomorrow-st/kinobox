@@ -27,6 +27,8 @@ function fakeApi(overrides: Partial<Api> = {}): Api {
     checkMirrors: async () => ({ ok: true, value: initial }),
     addMirror: async (url) => ({ ok: true, value: mirror(url, { state: "open", active: true }) }),
     selectMirror: async (url) => ({ ok: true, value: mirror(url, { state: "open", active: true }) }),
+    catalog: async () => ({ ok: true, value: [] }),
+    search: async () => ({ ok: true, value: [] }),
     quit: async () => {},
     ...overrides,
   };
