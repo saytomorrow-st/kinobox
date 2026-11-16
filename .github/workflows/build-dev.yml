@@ -190,11 +190,18 @@ jobs:
             exit 1
           fi
 
+      # path указывает на родительскую папку (bundle/macos), а не на сам
+      # KinoBox.app: upload-artifact при загрузке ОДНОЙ директории кладёт в
+      # архив её СОДЕРЖИМОЕ, теряя имя самой директории — т.е. если указать
+      # путь прямо на KinoBox.app, в артефакте окажется голый Contents/ без
+      # обёртки ".app" (Finder видит это как unix-бинарник, не как
+      # приложение). Указывая родителя, сохраняем "KinoBox.app" как дочернюю
+      # запись с правильным именем/расширением.
       - name: Upload .app
         uses: actions/upload-artifact@v4
         with:
           name: KinoBox-debug-universal
-          path: target/universal-apple-darwin/debug/bundle/macos/KinoBox.app
+          path: target/universal-apple-darwin/debug/bundle/macos
           retention-days: 14
 
   # x86_64-only: та же сборка, но без universal/lipo и без второго раннера —
@@ -315,11 +322,14 @@ jobs:
             exit 1
           fi
 
+      # path — родительская папка, не сам .app (см. комментарий у universal
+      # job'а выше: upload-artifact разворачивает одну директорию без
+      # обёртки её именем).
       - name: Upload .app
         uses: actions/upload-artifact@v4
         with:
           name: KinoBox-debug-x86_64
-          path: target/x86_64-apple-darwin/debug/bundle/macos/KinoBox.app
+          path: target/x86_64-apple-darwin/debug/bundle/macos
           retention-days: 14
 
   # Вторая архитектура libmpv: на Intel-раннере Homebrew ставит x86_64-бутылки
