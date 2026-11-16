@@ -39,13 +39,13 @@ export const commands = {
 	playerLoad: (quality: StreamQualityDto, qualities: StreamQualityDto[], options?: InvokeOptions) => typedError<null, IpcError>(__TAURI_INVOKE("player_load", { quality, qualities }, options)),
 	playerPlay: (options?: InvokeOptions) => typedError<null, IpcError>(__TAURI_INVOKE("player_play", undefined, options)),
 	playerPause: (options?: InvokeOptions) => typedError<null, IpcError>(__TAURI_INVOKE("player_pause", undefined, options)),
-	playerSeek: (seconds: number, options?: InvokeOptions) => typedError<null, IpcError>(__TAURI_INVOKE("player_seek", { seconds }, options)),
+	playerSeek: (seconds: number | null, options?: InvokeOptions) => typedError<null, IpcError>(__TAURI_INVOKE("player_seek", { seconds }, options)),
 	/**
 	 *  Переключает качество текущего файла с сохранением позиции (`switch_quality`): вызывается,
 	 *  только когда плеер уже играет то же произведение, поэтому перезагрузка не нужна.
 	 */
 	playerSetQuality: (quality: StreamQualityDto, options?: InvokeOptions) => typedError<null, IpcError>(__TAURI_INVOKE("player_set_quality", { quality }, options)),
-	playerSetVolume: (volume: number, options?: InvokeOptions) => typedError<null, IpcError>(__TAURI_INVOKE("player_set_volume", { volume }, options)),
+	playerSetVolume: (volume: number | null, options?: InvokeOptions) => typedError<null, IpcError>(__TAURI_INVOKE("player_set_volume", { volume }, options)),
 	/**
 	 *  Останавливает воспроизведение: закрывает окно плеера, а очистка `WindowedPlayer` происходит
 	 *  в обработчике события окна на главном потоке.
