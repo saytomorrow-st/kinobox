@@ -160,6 +160,21 @@ jobs:
           scripts/patch-app-binary.sh \
             "target/universal-apple-darwin/debug/bundle/macos/KinoBox.app/Contents/MacOS/KinoBox"
 
+      # lipo (universal-склейка) и install_name_tool (патч LC_LOAD_DYLIB/-id)
+      # портят исходную подпись Homebrew-бутылок — Gatekeeper на скачанном
+      # (quarantine xattr) .app видит невалидную подпись и либо спрашивает
+      # разрешение на КАЖДУЮ dylib по отдельности, либо прямо пишет
+      # "приложение повреждено". Ad-hoc codesign всего бандла целиком
+      # (--deep подписывает вложенные Frameworks/*.dylib тоже) после патча —
+      # единственное надёжное исправление. Без --options runtime (hardened
+      # runtime не нужен для debug-сборки, и так не требует валидации библиотек).
+      - name: Codesign app bundle (ad-hoc)
+        run: |
+          set -euo pipefail
+          APP=target/universal-apple-darwin/debug/bundle/macos/KinoBox.app
+          codesign --force --deep --sign - "$APP"
+          codesign --verify --deep --strict "$APP"
+
       # Живой запуск в CI невозможен, поэтому самодостаточность бандла
       # проверяется по otool: ни одной абсолютной ссылки Homebrew быть не должно.
       - name: Verify vendored libmpv
@@ -274,6 +289,18 @@ jobs:
         run: |
           scripts/patch-app-binary.sh \
             "target/x86_64-apple-darwin/debug/bundle/macos/KinoBox.app/Contents/MacOS/KinoBox"
+
+      # Та же причина, что в universal job'е: lipo/install_name_tool портят
+      # подпись Homebrew-бутылок, из-за чего Gatekeeper на скачанном .app
+      # либо спрашивает разрешение на каждую dylib отдельно, либо пишет
+      # "приложение повреждено". Ad-hoc codesign всего бандла (--deep на
+      # вложенные Frameworks/*.dylib) после патча — обязателен.
+      - name: Codesign app bundle (ad-hoc)
+        run: |
+          set -euo pipefail
+          APP=target/x86_64-apple-darwin/debug/bundle/macos/KinoBox.app
+          codesign --force --deep --sign - "$APP"
+          codesign --verify --deep --strict "$APP"
 
       - name: Verify vendored libmpv
         run: |
