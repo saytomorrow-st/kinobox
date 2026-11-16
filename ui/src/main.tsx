@@ -5,7 +5,8 @@ import { App } from "./App";
 import "./index.css";
 
 const label = getCurrentWindow().label;
-document.body.classList.add(label === "login" ? "bg-transparent" : "bg-bg");
+const transparentWindows = ["login", "player-controls"];
+document.body.classList.add(transparentWindows.includes(label) ? "bg-transparent" : "bg-bg");
 
 const root = document.getElementById("root");
 if (root) {

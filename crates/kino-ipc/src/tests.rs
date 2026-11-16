@@ -7,10 +7,13 @@ use kino_api::{
 };
 use serde::Serialize;
 use url::Url;
-use wiremock::matchers::{method, path};
+use wiremock::matchers::{body_string, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-use crate::{AppService, BootState, IpcError, IpcErrorKind, MirrorDto, MirrorStateDto, UserDto};
+use crate::{
+    AppService, BootState, EpisodeDto, IpcError, IpcErrorKind, MediaDetailsDto, MediaItemDto,
+    MediaKindDto, MirrorDto, MirrorStateDto, StreamQualityDto, UserDto,
+};
 
 const PASSWORD: &str = "Zq9!pw-secret";
 const EMAIL: &str = "user@example.com";
@@ -546,4 +549,305 @@ fn ipc_error_is_an_error_and_displays_message() {
     let err = IpcError::new(IpcErrorKind::Internal, "сбой");
     let boxed: Box<dyn std::error::Error> = Box::new(err);
     assert_eq!(boxed.to_string(), "сбой");
+}
+
+// --- Каталог, поиск, детали, серии (#020) ---
+
+fn card(id: u64, data_url: &str) -> String {
+    format!(
+        "<div class=\"b-content__inline_item\" data-id=\"{id}\" data-url=\"{data_url}\">\
+         <div class=\"b-content__inline_item-link\"><a href=\"{data_url}\">Фильм {id}</a>\
+         <div>2024, США, боевик</div></div>\
+         <i class=\"entity\">Фильм</i></div>"
+    )
+}
+
+/// Страница деталей сериала: один перевод, один сезон с двумя сериями.
+fn series_details_html(id: u64) -> String {
+    format!(
+        r#"<input id="post_id" value="{id}">
+        <div class="b-post__title"><h1>Сериал {id}</h1></div>
+        <ul id="translators-list"><li data-translator_id="111">Дублированный</li></ul>
+        <ul><li class="b-simple_season__item" data-tab_id="1">1 сезон</li></ul>
+        <ul>
+            <li class="b-simple_episode__item" data-season_id="1" data-episode_id="1">1 серия</li>
+            <li class="b-simple_episode__item" data-season_id="1" data-episode_id="2">2 серия</li>
+        </ul>"#
+    )
+}
+
+fn series_item(id: u64, server: &MockServer) -> MediaItemDto {
+    MediaItemDto {
+        id,
+        title: format!("Сериал {id}"),
+        original_title: None,
+        year: None,
+        kind: MediaKindDto::Series,
+        poster_url: None,
+        page_url: format!("{}/series/{id}.html", server.uri()),
+        rating: None,
+    }
+}
+
+#[tokio::test]
+async fn catalog_delegates_to_provider_on_active_mirror() {
+    let server =
+        answering(ResponseTemplate::new(200).set_body_string(card(9, "/films/9.html"))).await;
+    let service = service(&[&server]).await;
+    service.pool.store().set_active(base(&server)).await;
+
+    let items = service
+        .catalog(Some(MediaKindDto::Movie), 2)
+        .await
+        .expect("каталог");
+
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0].id, 9);
+    assert_eq!(items[0].kind, MediaKindDto::Movie);
+    let requested = server
+        .received_requests()
+        .await
+        .expect("запросы")
+        .into_iter()
+        .next()
+        .expect("хотя бы один запрос");
+    assert_eq!(requested.url.path(), "/films/page/2/");
+}
+
+#[tokio::test]
+async fn catalog_without_active_mirror_resolves_one() {
+    let server =
+        answering(ResponseTemplate::new(200).set_body_string(card(9, "/films/9.html"))).await;
+    let service = service(&[&server]).await;
+    assert_eq!(service.pool.store().active().await, None);
+
+    let items = service.catalog(None, 1).await.expect("каталог");
+
+    assert_eq!(items.len(), 1);
+    assert_eq!(service.pool.store().active().await, Some(base(&server)));
+}
+
+#[tokio::test]
+async fn catalog_reports_no_mirrors() {
+    let broken = dead().await;
+    let service = service(&[&broken]).await;
+
+    let err = service.catalog(None, 1).await.expect_err("ожидали ошибку");
+
+    assert_eq!(err.kind, IpcErrorKind::NoMirrors);
+}
+
+#[tokio::test]
+async fn search_empty_query_skips_network() {
+    let server = answering(ResponseTemplate::new(200)).await;
+    let service = service(&[&server]).await;
+    service.pool.store().set_active(base(&server)).await;
+
+    let items = service.search("   ".to_string()).await.expect("поиск");
+
+    assert!(items.is_empty());
+    assert_eq!(hits(&server).await, 0);
+}
+
+#[tokio::test]
+async fn search_delegates_to_provider() {
+    let server =
+        answering(ResponseTemplate::new(200).set_body_string(card(7, "/films/7.html"))).await;
+    let service = service(&[&server]).await;
+    service.pool.store().set_active(base(&server)).await;
+
+    let items = service.search("the".to_string()).await.expect("поиск");
+
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0].id, 7);
+}
+
+#[tokio::test]
+async fn details_delegates_to_provider() {
+    let server =
+        answering(ResponseTemplate::new(200).set_body_string(series_details_html(7))).await;
+    let service = service(&[&server]).await;
+    service.pool.store().set_active(base(&server)).await;
+    let item = series_item(7, &server);
+
+    let details = service.details(item).await.expect("детали");
+
+    assert_eq!(details.item.id, 7);
+    assert_eq!(details.translators.len(), 1);
+    assert_eq!(details.seasons.len(), 1);
+}
+
+#[tokio::test]
+async fn details_rejects_malformed_item_without_requests() {
+    let server = answering(ResponseTemplate::new(200)).await;
+    let service = service(&[&server]).await;
+    service.pool.store().set_active(base(&server)).await;
+    let mut item = series_item(7, &server);
+    item.page_url = "не url".to_string();
+
+    let err = service.details(item).await.expect_err("ожидали ошибку");
+
+    assert_eq!(err.kind, IpcErrorKind::InvalidInput);
+    assert_eq!(hits(&server).await, 0);
+}
+
+#[tokio::test]
+async fn details_propagates_not_found_as_internal() {
+    let server = answering(ResponseTemplate::new(404)).await;
+    let service = service(&[&server]).await;
+    service.pool.store().set_active(base(&server)).await;
+    let item = series_item(7, &server);
+
+    let err = service.details(item).await.expect_err("ожидали ошибку");
+
+    assert_eq!(err.kind, IpcErrorKind::Internal);
+}
+
+#[tokio::test]
+async fn episodes_delegates_to_provider() {
+    let series_page =
+        answering(ResponseTemplate::new(200).set_body_string(series_details_html(7))).await;
+    Mock::given(method("POST"))
+        .and(path("/ajax/get_cdn_series/"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(
+            r#"{"success":true,"episodes":{"1":"<ul><li>1 серия</li><li>2 серия</li></ul>"}}"#,
+        ))
+        .mount(&series_page)
+        .await;
+    let service = service(&[&series_page]).await;
+    service.pool.store().set_active(base(&series_page)).await;
+    let item = series_item(7, &series_page);
+    let details = service.details(item).await.expect("детали");
+
+    let episodes = service.episodes(details).await.expect("серии");
+
+    assert_eq!(
+        episodes,
+        vec![
+            EpisodeDto {
+                season_id: 1,
+                episode_id: 1,
+                title: "1 серия".to_string(),
+            },
+            EpisodeDto {
+                season_id: 1,
+                episode_id: 2,
+                title: "2 серия".to_string(),
+            },
+        ]
+    );
+}
+
+#[tokio::test]
+async fn episodes_for_movie_without_seasons_skips_network() {
+    let server = answering(ResponseTemplate::new(200)).await;
+    let service = service(&[&server]).await;
+    service.pool.store().set_active(base(&server)).await;
+    let details = MediaDetailsDto {
+        item: series_item(7, &server),
+        description: None,
+        genres: vec![],
+        countries: vec![],
+        duration_minutes: None,
+        translators: vec![],
+        seasons: vec![],
+    };
+
+    let episodes = service.episodes(details).await.expect("серии");
+
+    assert!(episodes.is_empty());
+    assert_eq!(hits(&server).await, 0);
+}
+
+#[tokio::test]
+async fn streams_for_series_episode_delegates_to_provider() {
+    let series_page =
+        answering(ResponseTemplate::new(200).set_body_string(series_details_html(7))).await;
+    let plain = "[720p]https://cdn.example.com/720.mp4";
+    let obfuscated = format!(
+        "#h{}",
+        base64::Engine::encode(&base64::engine::general_purpose::STANDARD, plain)
+    );
+    let body = format!(r#"{{"success":true,"url":"{obfuscated}"}}"#);
+    Mock::given(method("POST"))
+        .and(path("/ajax/get_cdn_series/"))
+        .and(body_string(
+            "id=7&translator_id=111&action=get_stream&season=1&episode=2",
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_string(body))
+        .mount(&series_page)
+        .await;
+    let service = service(&[&series_page]).await;
+    service.pool.store().set_active(base(&series_page)).await;
+    let item = series_item(7, &series_page);
+    let episode = EpisodeDto {
+        season_id: 1,
+        episode_id: 2,
+        title: "2 серия".to_string(),
+    };
+
+    let streams = service
+        .streams(item, None, Some(episode))
+        .await
+        .expect("потоки");
+
+    assert_eq!(
+        streams,
+        vec![StreamQualityDto {
+            label: "720p".to_string(),
+            url: "https://cdn.example.com/720.mp4".to_string(),
+            premium: false,
+            hls: None,
+            fallbacks: vec![],
+        }]
+    );
+}
+
+/// Страница деталей фильма с данными плеера (`initCDNMoviesEvents`): потоки фильма берутся
+/// из `raw_html`, который `streams` получает, перезапросив детали внутри.
+fn movie_details_html(id: u64) -> String {
+    format!(
+        r#"<input id="post_id" value="{id}">
+        <div class="b-post__title"><h1>Фильм {id}</h1></div>
+        <script>sof.tv.initCDNMoviesEvents({id}, 111, 0, 0, 0, 'kvk.pub', true, false,
+            {{"id":"cdnplayer","streams":"[720p]https://cdn.example.com/720.mp4","thumbnails":"/ajax/get_cdn_tiles/0/0/"}}
+        );</script>"#
+    )
+}
+
+fn movie_item(id: u64, server: &MockServer) -> MediaItemDto {
+    MediaItemDto {
+        id,
+        title: format!("Фильм {id}"),
+        original_title: None,
+        year: None,
+        kind: MediaKindDto::Movie,
+        poster_url: None,
+        page_url: format!("{}/films/{id}.html", server.uri()),
+        rating: None,
+    }
+}
+
+/// Фильм (`episode = None`) перезапрашивает детали внутри `streams` и деобфусцирует потоки
+/// из данных плеера страницы (`raw_html`) — успешный путь, без обхода сети.
+#[tokio::test]
+async fn streams_for_movie_uses_player_data_from_details_page() {
+    let server =
+        answering(ResponseTemplate::new(200).set_body_string(movie_details_html(85038))).await;
+    let service = service(&[&server]).await;
+    service.pool.store().set_active(base(&server)).await;
+    let item = movie_item(85038, &server);
+
+    let streams = service.streams(item, None, None).await.expect("потоки");
+
+    assert_eq!(
+        streams,
+        vec![StreamQualityDto {
+            label: "720p".to_string(),
+            url: "https://cdn.example.com/720.mp4".to_string(),
+            premium: false,
+            hls: None,
+            fallbacks: vec![],
+        }]
+    );
 }

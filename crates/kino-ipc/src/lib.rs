@@ -2,6 +2,7 @@
 //!
 //! Сервисный слой без зависимости от Tauri: `AppService` и DTO с `serde`.
 
+mod catalog;
 mod dto;
 mod error;
 mod mirrors;
@@ -10,7 +11,10 @@ mod session;
 #[cfg(test)]
 mod tests;
 
-pub use dto::{BootState, MirrorDto, MirrorStateDto, UserDto};
+pub use dto::{
+    BootState, EpisodeDto, MediaDetailsDto, MediaItemDto, MediaKindDto, MirrorDto, MirrorStateDto,
+    PlayerProgressDto, SeasonDto, StreamQualityDto, TranslatorDto, TranslatorId, UserDto,
+};
 pub use error::{IpcError, IpcErrorKind};
 pub use kino_api::{
     ClientConfig, KeychainSecretStore, MemoryMirrorStore, MemorySecretStore, MirrorConfig,

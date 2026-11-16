@@ -1,6 +1,7 @@
 //! Оболочка Tauri: окна, регистрация команд `kino-ipc`, привязки TypeScript.
 
 mod commands;
+mod player_state;
 mod state;
 mod windows;
 
@@ -25,6 +26,19 @@ fn bindings_builder() -> Builder<Wry> {
             commands::add_mirror,
             commands::select_mirror,
             commands::quit,
+            commands::catalog,
+            commands::search,
+            commands::details,
+            commands::episodes,
+            commands::streams,
+            commands::player_load,
+            commands::player_play,
+            commands::player_pause,
+            commands::player_seek,
+            commands::player_set_quality,
+            commands::player_set_volume,
+            commands::player_stop,
+            commands::player_qualities,
         ])
 }
 
@@ -44,6 +58,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     tauri::Builder::default()
         .manage(service)
+        .manage(player_state::PlayerState::default())
         .invoke_handler(builder.invoke_handler())
         .run(tauri::generate_context!())?;
     Ok(())

@@ -10,6 +10,19 @@ const COMMANDS: &[&str] = &[
     "add_mirror",
     "select_mirror",
     "quit",
+    "catalog",
+    "search",
+    "details",
+    "episodes",
+    "streams",
+    "player_load",
+    "player_play",
+    "player_pause",
+    "player_seek",
+    "player_set_quality",
+    "player_set_volume",
+    "player_stop",
+    "player_qualities",
 ];
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

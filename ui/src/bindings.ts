@@ -18,6 +18,44 @@ export const commands = {
 	addMirror: (url: string, options?: InvokeOptions) => typedError<MirrorDto, IpcError>(__TAURI_INVOKE("add_mirror", { url }, options)),
 	selectMirror: (url: string, options?: InvokeOptions) => typedError<MirrorDto, IpcError>(__TAURI_INVOKE("select_mirror", { url }, options)),
 	quit: (options?: InvokeOptions) => __TAURI_INVOKE<void>("quit", undefined, options),
+	catalog: (kind: MediaKindDto | null, page: number, options?: InvokeOptions) => typedError<MediaItemDto[], IpcError>(__TAURI_INVOKE("catalog", { kind, page }, options)),
+	search: (query: string, options?: InvokeOptions) => typedError<MediaItemDto[], IpcError>(__TAURI_INVOKE("search", { query }, options)),
+	details: (item: MediaItemDto, options?: InvokeOptions) => typedError<MediaDetailsDto, IpcError>(__TAURI_INVOKE("details", { item }, options)),
+	episodes: (details: MediaDetailsDto, options?: InvokeOptions) => typedError<EpisodeDto[], IpcError>(__TAURI_INVOKE("episodes", { details }, options)),
+	/**
+	 *  Потоки уже после деобфускации. `translator_id = None` — перевод по умолчанию; `episode`
+	 *  задаётся только для сериала. Детали перезапрашиваются внутри сервиса (`raw_html` по IPC
+	 *  не идёт).
+	 */
+	streams: (item: MediaItemDto, translatorId: TranslatorId | null, episode: EpisodeDto | null, options?: InvokeOptions) => typedError<StreamQualityDto[], IpcError>(__TAURI_INVOKE("streams", { item, translatorId, episode }, options)),
+	/**
+	 *  Открывает окно плеера, привязывает рендер и загружает качество как новый файл (полная
+	 *  перезагрузка, позиция не сохраняется — это старт просмотра). Повторный вызов с уже открытым
+	 *  плеером только переключает файл, не пересоздавая `WindowedPlayer`. `qualities` — полный список
+	 *  доступных качеств (из `streams`), запоминается для `player_qualities`: окно `player-controls`
+	 *  не может прочитать стор главного окна (отдельная JS-среда), поэтому список приходит и
+	 *  хранится здесь, а не передаётся напрямую.
+	 */
+	playerLoad: (quality: StreamQualityDto, qualities: StreamQualityDto[], options?: InvokeOptions) => typedError<null, IpcError>(__TAURI_INVOKE("player_load", { quality, qualities }, options)),
+	playerPlay: (options?: InvokeOptions) => typedError<null, IpcError>(__TAURI_INVOKE("player_play", undefined, options)),
+	playerPause: (options?: InvokeOptions) => typedError<null, IpcError>(__TAURI_INVOKE("player_pause", undefined, options)),
+	playerSeek: (seconds: number | null, options?: InvokeOptions) => typedError<null, IpcError>(__TAURI_INVOKE("player_seek", { seconds }, options)),
+	/**
+	 *  Переключает качество текущего файла с сохранением позиции (`switch_quality`): вызывается,
+	 *  только когда плеер уже играет то же произведение, поэтому перезагрузка не нужна.
+	 */
+	playerSetQuality: (quality: StreamQualityDto, options?: InvokeOptions) => typedError<null, IpcError>(__TAURI_INVOKE("player_set_quality", { quality }, options)),
+	playerSetVolume: (volume: number | null, options?: InvokeOptions) => typedError<null, IpcError>(__TAURI_INVOKE("player_set_volume", { volume }, options)),
+	/**
+	 *  Останавливает воспроизведение: закрывает окно плеера, а очистка `WindowedPlayer` происходит
+	 *  в обработчике события окна на главном потоке.
+	 */
+	playerStop: (options?: InvokeOptions) => typedError<null, IpcError>(__TAURI_INVOKE("player_stop", undefined, options)),
+	/**
+	 *  Список качеств, сохранённый последним `player_load` — читает окно `player-controls`, у
+	 *  которого нет доступа к стору главного окна (отдельная JS-среда).
+	 */
+	playerQualities: (options?: InvokeOptions) => typedError<StreamQualityDto[], IpcError>(__TAURI_INVOKE("player_qualities", undefined, options)),
 };
 
 /* Types */
@@ -28,12 +66,48 @@ export type BootState =
 /**  Зеркала или сеть недоступны. Сохранённые данные не тронуты. */
 { state: "unavailable"; message: string };
 
+/**  Одна серия сериала. */
+export type EpisodeDto = {
+	seasonId: number,
+	episodeId: number,
+	title: string,
+};
+
 export type IpcError = {
 	kind: IpcErrorKind,
 	message: string,
 };
 
 export type IpcErrorKind = "invalidInput" | "loginRejected" | "authRequired" | "challenge" | "network" | "keychain" | "noMirrors" | "internal";
+
+/**
+ *  Подробная карточка произведения. `rawHtml` ядра сюда не попадает: поле отсутствует
+ *  как таковое (см. `media_details_dto_has_no_raw_html_field`).
+ */
+export type MediaDetailsDto = {
+	item: MediaItemDto,
+	description: string | null,
+	genres: string[],
+	countries: string[],
+	durationMinutes: number | null,
+	translators: TranslatorDto[],
+	seasons: SeasonDto[],
+};
+
+/**  Карточка произведения в каталоге, поиске или избранном. */
+export type MediaItemDto = {
+	id: number,
+	title: string,
+	originalTitle: string | null,
+	year: number | null,
+	kind: MediaKindDto,
+	posterUrl: string | null,
+	pageUrl: string,
+	rating: number | null,
+};
+
+/**  Тип произведения в каталоге HDrezka. */
+export type MediaKindDto = "movie" | "series" | "cartoon" | "anime";
 
 export type MirrorDto = {
 	url: string,
@@ -46,6 +120,35 @@ export type MirrorDto = {
 };
 
 export type MirrorStateDto = "unknown" | "open" | "needsLogin" | "challenge" | "dead";
+
+/**  Сезон сериала: номер и список номеров серий. */
+export type SeasonDto = {
+	number: number,
+	episodes: number[],
+};
+
+/**  Один вариант качества потока после деобфускации. */
+export type StreamQualityDto = {
+	label: string,
+	url: string,
+	premium: boolean,
+	hls: string | null,
+	fallbacks: string[],
+};
+
+/**  Перевод (озвучка), доступный для произведения. */
+export type TranslatorDto = {
+	id: number,
+	name: string,
+};
+
+/**
+ *  Идентификатор перевода HDrezka для команд, принимающих `Option`-идентификатор.
+ *  Как и `TranslatorDto::id`, экспортируется в TypeScript как `number`: ID укладываются в
+ *  JS-число (до 2^53-1), потерь точности нет. Обёртка нужна, потому что specta запрещает
+ *  голый `u64`/`i64` в сигнатурах команд (см. «Specta и u64» в `CRATE.md`).
+ */
+export type TranslatorId = number;
 
 export type UserDto = {
 	userId: number,

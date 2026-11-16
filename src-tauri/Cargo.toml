@@ -21,7 +21,10 @@ tauri-build.workspace = true
 
 [dependencies]
 kino-ipc.workspace = true
+kino-player.workspace = true
+kino-core.workspace = true
 tauri.workspace = true
 tauri-specta.workspace = true
 specta.workspace = true
 specta-typescript.workspace = true
+tokio = { workspace = true, features = ["sync"] }
