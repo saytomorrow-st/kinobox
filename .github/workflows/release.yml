@@ -132,11 +132,19 @@ jobs:
         run: cargo tauri build --target universal-apple-darwin --no-bundle
         working-directory: src-tauri
 
+      # ВНИМАНИЕ (известный риск, не покрыт этим фиксом): build-dev.yml показал,
+      # что `cargo tauri build` перелинковывает Rust-бинарь при КАЖДОМ вызове
+      # независимо от --no-bundle/--bundles (смена CLI-флагов/signing-окружения
+      # триггерит rerun-if-env-changed), так что патч здесь может быть стёрт
+      # следующим вызовом `tauri build` внутри tauri-action. В build-dev.yml это
+      # решено единственным проходом сборки + патчем УЖЕ ВНУТРИ .app — здесь так
+      # сделать не вышло напрямую, т.к. install_name_tool должен быть ДО
+      # codesign, а codesign делает tauri-action за один шаг с бандлингом. Если
+      # release-сборка упадёт на "Verify vendored libmpv" с абсолютными путями —
+      # смотреть сюда первым делом.
+      #
       # Патч бинаря В TARGET DIR (не внутри .app): LC_LOAD_DYLIB →
       # @rpath/libmpv.2.dylib + LC_RPATH @executable_path/../Frameworks.
-      # Бандлер копирует этот файл в каждый новый .app, поэтому патч переживает
-      # любую пересборку бандла, включая ту, что делает tauri-action — при
-      # условии, что tauri.macos.conf.json (написанный выше) больше не меняется.
       - name: Patch binary in cargo target dir
         run: |
           scripts/patch-app-binary.sh \

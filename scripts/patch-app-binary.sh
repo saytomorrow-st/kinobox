@@ -1,16 +1,18 @@
 #!/usr/bin/env bash
-# Патчит Rust-бинарь В CARGO TARGET DIR (не внутри .app) так, чтобы он загружал
-# libmpv из Contents/Frameworks бандла: LC_LOAD_DYLIB → @rpath/libmpv.2.dylib,
-# плюс LC_RPATH @executable_path/../Frameworks.
+# Патчит Rust-бинарь так, чтобы он загружал libmpv из Contents/Frameworks
+# бандла: LC_LOAD_DYLIB → @rpath/libmpv.2.dylib, плюс LC_RPATH
+# @executable_path/../Frameworks.
 #
-# Почему именно target dir, а не Contents/MacOS внутри .app:
-#   tauri-bundler при каждой сборке удаляет .app целиком и заново копирует
-#   бинарь из target dir (copy_binaries_to_bundle → settings.binary_path()).
-#   Патч на копии внутри .app исчезнет при следующей сборке бандла; патч на
-#   источнике в target dir сохраняется и попадает в каждый новый .app.
+# Запускается ПОСЛЕ единственной сборки `cargo tauri build --bundles app`,
+# на бинаре УЖЕ ВНУТРИ .app (Contents/MacOS/KinoBox), а не в cargo target dir:
+# `cargo tauri build` перелинковывает Rust-бинарь при каждом вызове независимо
+# от --no-bundle/--bundles (tauri-build триггерит пересборку kinobox-app на
+# смену CLI-флагов), так что патч в target dir перед вторым вызовом всегда
+# стирался бы повторной линковкой. Раз сборка бандла — только одна, патч
+# внутри .app никто больше не перезатирает.
 #
 # Использование:
-#   scripts/patch-app-binary.sh <путь к бинарю в target dir>
+#   scripts/patch-app-binary.sh <путь к бинарю внутри .app>
 set -euo pipefail
 
 if [[ $# -ne 1 ]]; then
