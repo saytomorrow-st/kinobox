@@ -114,16 +114,21 @@ done < "$DEP_LIST"
 # Заменяет любую ссылку, чей basename совпадает с вендоренным файлом, на
 # @rpath/<имя>. Работает и для абсолютных путей Homebrew (/opt/homebrew/lib/…),
 # и для @rpath/…, и для @loader_path/…
+#
+# Идёт от РЕАЛЬНЫХ строк зависимостей target (`otool -L`), а не от DEP_LIST
+# через реконструкцию regex — последнее хрупко (несовпадение по формату пути
+# на Homebrew 4.x давало пустой "current" и тихо пропускало rewrite, из-за
+# чего абсолютные /usr/local и /opt/homebrew пути оставались в собранных
+# dylib). Проверка "basename зависимости есть в стейдже" достаточна: раз файл
+# там лежит — он вендорен и адресуется через @rpath.
 rewrite_deps() {
-  local target="$1" dep dep_name current
+  local target="$1" dep dep_name
   while IFS= read -r dep; do
     dep_name="$(basename "$dep")"
-    current="$(otool -L "$target" | tail -n +2 | awk '{print $1}' \
-      | grep -E "(^|/)$(printf '%s' "$dep_name" | sed 's/[.]/\\./g')\$" | head -1 || true)"
-    [[ -z "$current" ]] && continue
-    [[ "$current" == "@rpath/$dep_name" ]] && continue
-    install_name_tool -change "$current" "@rpath/$dep_name" "$target"
-  done < "$DEP_LIST"
+    [[ -f "$STAGE/$dep_name" ]] || continue
+    [[ "$dep" == "@rpath/$dep_name" ]] && continue
+    install_name_tool -change "$dep" "@rpath/$dep_name" "$target"
+  done < <(otool -L "$target" | tail -n +2 | awk '{print $1}')
 }
 
 # Все файлы уже в стейдже и окончательные — порядок обхода не важен.
