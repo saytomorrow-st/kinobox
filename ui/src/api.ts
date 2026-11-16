@@ -2,15 +2,31 @@
 import {
   commands,
   type BootState,
+  type EpisodeDto,
   type IpcError,
+  type MediaDetailsDto,
   type MediaItemDto,
   type MediaKindDto,
   type MirrorDto,
   type MirrorStateDto,
+  type StreamQualityDto,
+  type TranslatorId,
   type UserDto,
 } from "./bindings";
 
-export type { BootState, IpcError, MediaItemDto, MediaKindDto, MirrorDto, MirrorStateDto, UserDto };
+export type {
+  BootState,
+  EpisodeDto,
+  IpcError,
+  MediaDetailsDto,
+  MediaItemDto,
+  MediaKindDto,
+  MirrorDto,
+  MirrorStateDto,
+  StreamQualityDto,
+  TranslatorId,
+  UserDto,
+};
 
 export type Outcome<T> = { ok: true; value: T } | { ok: false; error: IpcError };
 
@@ -25,6 +41,14 @@ export interface Api {
   selectMirror(url: string): Promise<Outcome<MirrorDto>>;
   catalog(kind: MediaKindDto | null, page: number): Promise<Outcome<MediaItemDto[]>>;
   search(query: string): Promise<Outcome<MediaItemDto[]>>;
+  details(item: MediaItemDto): Promise<Outcome<MediaDetailsDto>>;
+  episodes(details: MediaDetailsDto): Promise<Outcome<EpisodeDto[]>>;
+  streams(
+    item: MediaItemDto,
+    translatorId: TranslatorId | null,
+    episode: EpisodeDto | null,
+  ): Promise<Outcome<StreamQualityDto[]>>;
+  playerLoad(quality: StreamQualityDto): Promise<Outcome<null>>;
   quit(): Promise<void>;
 }
 
@@ -75,6 +99,10 @@ export const tauriApi: Api = {
   selectMirror: (url) => call(() => commands.selectMirror(url)),
   catalog: (kind, page) => call(() => commands.catalog(kind, page)),
   search: (query) => call(() => commands.search(query)),
+  details: (item) => call(() => commands.details(item)),
+  episodes: (details) => call(() => commands.episodes(details)),
+  streams: (item, translatorId, episode) => call(() => commands.streams(item, translatorId, episode)),
+  playerLoad: (quality) => call(() => commands.playerLoad(quality)),
   quit: async () => {
     try {
       await commands.quit();
