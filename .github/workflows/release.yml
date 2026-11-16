@@ -7,19 +7,38 @@ on:
 
 jobs:
   # ---- Universal libmpv.dylib (#019) -------------------------------------
-  # Источник — официальные Homebrew-бутылки mpv по архитектурам: одна бутылка
-  # = одна архитектура, поэтому нужны два job'а (arm64 на macos-latest, x86_64
-  # на Intel-раннере macos-15-intel, `macos-13` ретирован 04.12.2025), а
-  # universal-файлы сливаются через lipo уже на arm64-раннере до сборки
-  # бандла. Rosetta на arm64-раннере не даёт x86_64-бутылки в /usr/local, а
-  # сборка mpv из исходников на runner'е слишком долгая и хрупкая — поэтому
-  # готовые бутылки Homebrew.
+  # Источник для arm64 — готовая Homebrew-бутылка (один job на macos-latest,
+  # ниже). Для x86_64 нужен отдельный job (Intel-раннер macos-15-intel,
+  # `macos-13` ретирован 04.12.2025): Rosetta на arm64-раннере не даёт
+  # x86_64-бутылки в /usr/local. Universal-файлы сливаются через lipo уже на
+  # arm64-раннере до сборки бандла.
+  #
+  # x86_64-бутылка mpv собирается Homebrew со Swift-кодом macOS-backend,
+  # который требует символ AppKit, появившийся только в macOS 14+ — краш при
+  # старте на более старых ОС (баг #11). Поэтому на x86_64 mpv собирается из
+  # исходников с патчем формулы (-Dswift-build=disabled), а не ставится
+  # готовой бутылкой.
   # ------------------------------------------------------------------------
   libmpv-x86_64:
     runs-on: macos-15-intel
     steps:
-      - name: Install mpv (x86_64 bottle)
-        run: brew install mpv
+      # Бутылка mpv для x86_64 собрана Homebrew со Swift-кодом macOS-backend
+      # (Touch Bar / media-key интеграция), который требует символ AppKit,
+      # появившийся только в macOS 14 — краш при старте на более старых ОС
+      # (баг #11). Патчим формулу локально (без тапа homebrew-core — он не
+      # клонится по умолчанию в API-режиме Homebrew) и собираем mpv из
+      # исходников с отключённым Swift; зависимости остаются бутылками.
+      - name: Install mpv (x86_64, built from source, Swift disabled — bug #11)
+        run: |
+          set -euo pipefail
+          curl -fsSL -o /tmp/mpv.rb \
+            https://raw.githubusercontent.com/Homebrew/homebrew-core/HEAD/Formula/m/mpv.rb
+          perl -pi -e 's/(-Dbuild-date=false)/$1\n    -Dswift-build=disabled/' /tmp/mpv.rb
+          grep -q 'Dswift-build=disabled' /tmp/mpv.rb || {
+            echo "ERROR: patch did not apply to mpv.rb (upstream formula changed?)" >&2
+            exit 1
+          }
+          brew install --build-from-source /tmp/mpv.rb
 
       - name: Show bottle architectures (diagnostics)
         run: lipo -info "$(brew --prefix mpv)/lib/libmpv.2.dylib"
@@ -182,3 +201,18 @@ jobs:
             echo "ERROR: absolute Homebrew paths survived bundling" >&2
             exit 1
           fi
+
+          # Регрессия бага #11: убеждаемся, что x86_64-слайс libmpv реально
+          # таргетит старую macOS, а не тянет Swift-код с AppKit-символом,
+          # появившимся в 14+ (см. -Dswift-build=disabled выше).
+          MIN_VER=$(otool -arch x86_64 -l "$APP/Contents/Frameworks/libmpv.2.dylib" \
+            | awk '$1=="minos" || $1=="version" {print $2; exit}')
+          if [[ -z "$MIN_VER" ]]; then
+            echo "ERROR: could not determine libmpv x86_64 minimum macOS version" >&2
+            exit 1
+          fi
+          if (( ${MIN_VER%%.*} > 13 )); then
+            echo "ERROR: libmpv.2.dylib (x86_64) requires macOS ${MIN_VER}+ — bug #11 regressed" >&2
+            exit 1
+          fi
+          echo "libmpv.2.dylib x86_64 minimum macOS: $MIN_VER (OK)"

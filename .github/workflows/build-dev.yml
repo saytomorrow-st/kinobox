@@ -190,6 +190,22 @@ jobs:
             exit 1
           fi
 
+          # Регрессия бага #11: убеждаемся, что x86_64-слайс libmpv реально
+          # таргетит старую macOS, а не тянет Swift-код с AppKit-символом,
+          # появившимся в 14+ (см. -Dswift-build=disabled выше). Проверяем
+          # именно x86_64-слайс universal-бинаря — он нужен юзеру.
+          MIN_VER=$(otool -arch x86_64 -l "$APP/Contents/Frameworks/libmpv.2.dylib" \
+            | awk '$1=="minos" || $1=="version" {print $2; exit}')
+          if [[ -z "$MIN_VER" ]]; then
+            echo "ERROR: could not determine libmpv x86_64 minimum macOS version" >&2
+            exit 1
+          fi
+          if (( ${MIN_VER%%.*} > 13 )); then
+            echo "ERROR: libmpv.2.dylib (x86_64) requires macOS ${MIN_VER}+ — bug #11 regressed" >&2
+            exit 1
+          fi
+          echo "libmpv.2.dylib x86_64 minimum macOS: $MIN_VER (OK)"
+
       # path указывает на родительскую папку (bundle/macos), а не на сам
       # KinoBox.app: upload-artifact при загрузке ОДНОЙ директории кладёт в
       # архив её СОДЕРЖИМОЕ, теряя имя самой директории — т.е. если указать
@@ -254,9 +270,25 @@ jobs:
       - name: Install tauri-cli
         run: cargo install tauri-cli --version "^2.0" --locked
 
-      - name: Install mpv (x86_64 bottle)
+      # Бутылка mpv для x86_64 собирается Homebrew со Swift-кодом macOS-backend
+      # (Touch Bar / media-key интеграция), который тянет символ AppKit,
+      # появившийся только в macOS 14 — на 13.x бинарь падает при старте
+      # (баг #11, см. crash report с "Symbol not found ... NSWindowLevel").
+      # Патчим формулу локально (без тапа homebrew-core — он не клонится по
+      # умолчанию в API-режиме Homebrew) и собираем mpv из исходников с
+      # отключённым Swift. Зависимости (ffmpeg, libass, ...) остаются
+      # обычными бутылками — Swift-символ есть только в самом mpv.
+      - name: Install mpv (x86_64, built from source, Swift disabled — bug #11)
         run: |
-          HOMEBREW_NO_BUILD_FROM_SOURCE=1 brew install mpv
+          set -euo pipefail
+          curl -fsSL -o /tmp/mpv.rb \
+            https://raw.githubusercontent.com/Homebrew/homebrew-core/HEAD/Formula/m/mpv.rb
+          perl -pi -e 's/(-Dbuild-date=false)/$1\n    -Dswift-build=disabled/' /tmp/mpv.rb
+          grep -q 'Dswift-build=disabled' /tmp/mpv.rb || {
+            echo "ERROR: patch did not apply to mpv.rb (upstream formula changed?)" >&2
+            exit 1
+          }
+          brew install --build-from-source /tmp/mpv.rb
           echo "LIBRARY_PATH=$(brew --prefix)/lib:${LIBRARY_PATH:-}" >> "$GITHUB_ENV"
 
       # Single-arch вендоринг: та же идея, что и universal-путь (стейджинг
@@ -322,6 +354,21 @@ jobs:
             exit 1
           fi
 
+          # Регрессия бага #11: убеждаемся, что libmpv реально таргетит
+          # старую macOS, а не тянет Swift-код с AppKit-символом, появившимся
+          # в 14+ (см. -Dswift-build=disabled выше).
+          MIN_VER=$(otool -l "$APP/Contents/Frameworks/libmpv.2.dylib" \
+            | awk '$1=="minos" || $1=="version" {print $2; exit}')
+          if [[ -z "$MIN_VER" ]]; then
+            echo "ERROR: could not determine libmpv minimum macOS version" >&2
+            exit 1
+          fi
+          if (( ${MIN_VER%%.*} > 13 )); then
+            echo "ERROR: libmpv.2.dylib requires macOS ${MIN_VER}+ — bug #11 regressed" >&2
+            exit 1
+          fi
+          echo "libmpv.2.dylib minimum macOS: $MIN_VER (OK)"
+
       # path — родительская папка, не сам .app (см. комментарий у universal
       # job'а выше: upload-artifact разворачивает одну директорию без
       # обёртки её именем).
@@ -339,8 +386,20 @@ jobs:
     if: ${{ inputs.arch != 'x86_64' }}
     runs-on: macos-15-intel
     steps:
-      - name: Install mpv (x86_64 bottle)
-        run: brew install mpv
+      # Та же причина, что и в job'е build-x86_64 выше (баг #11): бутылка
+      # mpv для x86_64 собрана со Swift-кодом macOS-backend, который требует
+      # macOS 14+. Собираем из исходников с отключённым Swift.
+      - name: Install mpv (x86_64, built from source, Swift disabled — bug #11)
+        run: |
+          set -euo pipefail
+          curl -fsSL -o /tmp/mpv.rb \
+            https://raw.githubusercontent.com/Homebrew/homebrew-core/HEAD/Formula/m/mpv.rb
+          perl -pi -e 's/(-Dbuild-date=false)/$1\n    -Dswift-build=disabled/' /tmp/mpv.rb
+          grep -q 'Dswift-build=disabled' /tmp/mpv.rb || {
+            echo "ERROR: patch did not apply to mpv.rb (upstream formula changed?)" >&2
+            exit 1
+          }
+          brew install --build-from-source /tmp/mpv.rb
 
       - name: Show bottle architectures (diagnostics)
         run: lipo -info "$(brew --prefix mpv)/lib/libmpv.2.dylib"
