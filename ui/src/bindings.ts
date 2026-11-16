@@ -31,8 +31,10 @@ export const commands = {
 	/**
 	 *  Открывает окно плеера, привязывает рендер и загружает качество как новый файл (полная
 	 *  перезагрузка, позиция не сохраняется — это старт просмотра). Повторный вызов с уже открытым
-	 *  плеером только переключает файл, не пересоздавая `WindowedPlayer`. `qualities` — полный
-	 *  список доступных качеств (из `streams`), сохраняется для `playerQualities`.
+	 *  плеером только переключает файл, не пересоздавая `WindowedPlayer`. `qualities` — полный список
+	 *  доступных качеств (из `streams`), запоминается для `player_qualities`: окно `player-controls`
+	 *  не может прочитать стор главного окна (отдельная JS-среда), поэтому список приходит и
+	 *  хранится здесь, а не передаётся напрямую.
 	 */
 	playerLoad: (quality: StreamQualityDto, qualities: StreamQualityDto[], options?: InvokeOptions) => typedError<null, IpcError>(__TAURI_INVOKE("player_load", { quality, qualities }, options)),
 	playerPlay: (options?: InvokeOptions) => typedError<null, IpcError>(__TAURI_INVOKE("player_play", undefined, options)),
@@ -49,7 +51,10 @@ export const commands = {
 	 *  в обработчике события окна на главном потоке.
 	 */
 	playerStop: (options?: InvokeOptions) => typedError<null, IpcError>(__TAURI_INVOKE("player_stop", undefined, options)),
-	/**  Список качеств, сохранённый последним `playerLoad` — для окна `player-controls`. */
+	/**
+	 *  Список качеств, сохранённый последним `player_load` — читает окно `player-controls`, у
+	 *  которого нет доступа к стору главного окна (отдельная JS-среда).
+	 */
 	playerQualities: (options?: InvokeOptions) => typedError<StreamQualityDto[], IpcError>(__TAURI_INVOKE("player_qualities", undefined, options)),
 };
 
@@ -135,14 +140,6 @@ export type StreamQualityDto = {
 export type TranslatorDto = {
 	id: number,
 	name: string,
-};
-
-/**  Снимок прогресса воспроизведения, который `src-tauri` эмиттит в окно `player-controls`
- *  сырым событием `player-progress` (не через `commands`, см. `@tauri-apps/api/event`). */
-export type PlayerProgressDto = {
-	position: number | null,
-	duration: number | null,
-	paused: boolean,
 };
 
 /**

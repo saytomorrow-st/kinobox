@@ -9,7 +9,6 @@ import {
   type MediaKindDto,
   type MirrorDto,
   type MirrorStateDto,
-  type PlayerProgressDto,
   type StreamQualityDto,
   type TranslatorId,
   type UserDto,
@@ -24,10 +23,18 @@ export type {
   MediaKindDto,
   MirrorDto,
   MirrorStateDto,
-  PlayerProgressDto,
   StreamQualityDto,
   TranslatorId,
   UserDto,
+};
+
+// `specta` не видит типы, которые используются только в сырых событиях (`emit_to`), а не в
+// сигнатурах команд — `player-progress` в bindings.ts не генерируется. Дублируем вручную,
+// зеркалируя `PlayerProgressDto` из `crates/kino-ipc/src/dto.rs` (camelCase через serde).
+export type PlayerProgressDto = {
+  position: number | null;
+  duration: number | null;
+  paused: boolean;
 };
 
 export type Outcome<T> = { ok: true; value: T } | { ok: false; error: IpcError };
