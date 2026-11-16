@@ -31,23 +31,26 @@ export const commands = {
 	/**
 	 *  Открывает окно плеера, привязывает рендер и загружает качество как новый файл (полная
 	 *  перезагрузка, позиция не сохраняется — это старт просмотра). Повторный вызов с уже открытым
-	 *  плеером только переключает файл, не пересоздавая `WindowedPlayer`.
+	 *  плеером только переключает файл, не пересоздавая `WindowedPlayer`. `qualities` — полный
+	 *  список доступных качеств (из `streams`), сохраняется для `playerQualities`.
 	 */
-	playerLoad: (quality: StreamQualityDto, options?: InvokeOptions) => typedError<null, IpcError>(__TAURI_INVOKE("player_load", { quality }, options)),
+	playerLoad: (quality: StreamQualityDto, qualities: StreamQualityDto[], options?: InvokeOptions) => typedError<null, IpcError>(__TAURI_INVOKE("player_load", { quality, qualities }, options)),
 	playerPlay: (options?: InvokeOptions) => typedError<null, IpcError>(__TAURI_INVOKE("player_play", undefined, options)),
 	playerPause: (options?: InvokeOptions) => typedError<null, IpcError>(__TAURI_INVOKE("player_pause", undefined, options)),
-	playerSeek: (seconds: number | null, options?: InvokeOptions) => typedError<null, IpcError>(__TAURI_INVOKE("player_seek", { seconds }, options)),
+	playerSeek: (seconds: number, options?: InvokeOptions) => typedError<null, IpcError>(__TAURI_INVOKE("player_seek", { seconds }, options)),
 	/**
 	 *  Переключает качество текущего файла с сохранением позиции (`switch_quality`): вызывается,
 	 *  только когда плеер уже играет то же произведение, поэтому перезагрузка не нужна.
 	 */
 	playerSetQuality: (quality: StreamQualityDto, options?: InvokeOptions) => typedError<null, IpcError>(__TAURI_INVOKE("player_set_quality", { quality }, options)),
-	playerSetVolume: (volume: number | null, options?: InvokeOptions) => typedError<null, IpcError>(__TAURI_INVOKE("player_set_volume", { volume }, options)),
+	playerSetVolume: (volume: number, options?: InvokeOptions) => typedError<null, IpcError>(__TAURI_INVOKE("player_set_volume", { volume }, options)),
 	/**
 	 *  Останавливает воспроизведение: закрывает окно плеера, а очистка `WindowedPlayer` происходит
 	 *  в обработчике события окна на главном потоке.
 	 */
 	playerStop: (options?: InvokeOptions) => typedError<null, IpcError>(__TAURI_INVOKE("player_stop", undefined, options)),
+	/**  Список качеств, сохранённый последним `playerLoad` — для окна `player-controls`. */
+	playerQualities: (options?: InvokeOptions) => typedError<StreamQualityDto[], IpcError>(__TAURI_INVOKE("player_qualities", undefined, options)),
 };
 
 /* Types */
@@ -132,6 +135,14 @@ export type StreamQualityDto = {
 export type TranslatorDto = {
 	id: number,
 	name: string,
+};
+
+/**  Снимок прогресса воспроизведения, который `src-tauri` эмиттит в окно `player-controls`
+ *  сырым событием `player-progress` (не через `commands`, см. `@tauri-apps/api/event`). */
+export type PlayerProgressDto = {
+	position: number | null,
+	duration: number | null,
+	paused: boolean,
 };
 
 /**

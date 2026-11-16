@@ -122,7 +122,7 @@ export function createDetailsStore(api: Api) {
         return;
       }
 
-      const loadOutcome = await api.playerLoad(quality);
+      const loadOutcome = await api.playerLoad(quality, streamsOutcome.value);
       if (!loadOutcome.ok) {
         set({ launching: false, launchError: ERROR_LAUNCH });
         return;

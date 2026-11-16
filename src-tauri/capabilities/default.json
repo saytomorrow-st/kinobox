@@ -25,6 +25,10 @@
     "allow-player-set-quality",
     "allow-player-set-volume",
     "allow-player-stop",
-    "core:window:allow-start-dragging"
+    "allow-player-qualities",
+    "core:window:allow-start-dragging",
+    "core:window:allow-set-ignore-cursor-events",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten"
   ]
 }

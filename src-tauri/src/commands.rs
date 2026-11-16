@@ -146,15 +146,19 @@ pub async fn streams(
 
 /// Открывает окно плеера, привязывает рендер и загружает качество как новый файл (полная
 /// перезагрузка, позиция не сохраняется — это старт просмотра). Повторный вызов с уже открытым
-/// плеером только переключает файл, не пересоздавая `WindowedPlayer`.
+/// плеером только переключает файл, не пересоздавая `WindowedPlayer`. `qualities` — полный список
+/// доступных качеств (из `streams`), запоминается для `player_qualities`: окно `player-controls`
+/// не может прочитать стор главного окна (отдельная JS-среда), поэтому список приходит и
+/// хранится здесь, а не передаётся напрямую.
 #[tauri::command]
 #[specta::specta]
 pub async fn player_load(
     app: AppHandle,
     player: State<'_, PlayerState>,
     quality: StreamQualityDto,
+    qualities: Vec<StreamQualityDto>,
 ) -> Result<(), IpcError> {
-    let quality = quality.try_into_stream_quality()?;
+    let quality_target = quality.clone().try_into_stream_quality()?;
     let shared = player.shared();
     let window = windows::open_player(&app, Arc::clone(&shared))?;
 
@@ -168,14 +172,24 @@ pub async fn player_load(
         start_progress_thread(app.clone(), Arc::clone(&shared));
     }
 
+    player.set_qualities(qualities);
+
     let guard = shared.lock().unwrap();
     let windowed = guard
         .as_ref()
         .ok_or_else(|| player_error("плеер не создан"))?;
     windowed
         .player()
-        .load_quality(&quality)
+        .load_quality(&quality_target)
         .map_err(player_error)
+}
+
+/// Список качеств, сохранённый последним `player_load` — читает окно `player-controls`, у
+/// которого нет доступа к стору главного окна (отдельная JS-среда).
+#[tauri::command]
+#[specta::specta]
+pub fn player_qualities(player: State<'_, PlayerState>) -> Result<Vec<StreamQualityDto>, IpcError> {
+    Ok(player.qualities())
 }
 
 #[tauri::command]

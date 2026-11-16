@@ -38,6 +38,7 @@ fn bindings_builder() -> Builder<Wry> {
             commands::player_set_quality,
             commands::player_set_volume,
             commands::player_stop,
+            commands::player_qualities,
         ])
 }
 

@@ -1,7 +1,7 @@
 ---
 id: 024
 type: feature
-status: open
+status: done
 model: claude-sonnet-5
 crate: ui
 created: 2026-11-15
@@ -38,3 +38,25 @@ created: 2026-11-15
 Зависит от #021 (команды и события плеера), #023 (точка входа — кнопка ▶). Последняя задача M3:
 после неё цепочка «вошёл → каталог → карточка → плеер» замыкается технически; финальную визуальную
 проверку делает заказчик на собранном через `build-dev.yml` `.app`.
+
+**Сделано:**
+
+- `PlayerState` расширен вторым полем — списком качеств последнего `player_load`. Новая команда
+  `player_qualities` отдаёт его окну `player-controls` (отдельная JS-среда, не видит стор главного
+  окна). `player_load` принял второй параметр `qualities: Vec<StreamQualityDto>`.
+- Прогресс воспроизведения приходит не командой, а сырым событием `player-progress`
+  (`@tauri-apps/api/event`'s `listen`) — новый паттерн, добавлены права
+  `core:event:allow-listen`/`allow-unlisten` и `core:window:allow-set-ignore-cursor-events`.
+- Клик-проходимость: `getCurrentWindow().setIgnoreCursorEvents(bool)`, переключается по
+  `onMouseEnter`/`onMouseLeave` на блоке контролов (не на всём окне) — так клики вне контролов не
+  мешают видео в окне `player` под ними.
+- Автоскрытие контролов — `useAutoHide` (debounce по `mousemove`/`keydown`, 3с).
+- Rust-сторона (`src-tauri/src/player_state.rs`, `commands.rs`, `lib.rs`, `capabilities/default.json`)
+  написана руками и **не компилировалась локально** — на этой машине нет libmpv, любая сборка
+  `kinobox-app`/`kino-player` запрещена (тянет `-lmpv`). Проверено только через CI.
+- **Известное ограничение:** субтитры вне скоупа — нет Tauri-команды над `Player::add_subtitle`, нет
+  данных о списке доступных дорожек ни в одном DTO. Чтобы добавить, нужна отдельная задача.
+- Тесты: `formatTime`, `player-store.ts` (init/dispose/идемпотентность/события/действия/close),
+  `PlayerControlsView` (через `renderToStaticMarkup`, без `@testing-library`), `useAutoHide`
+  (debounce-логика протестирована как чистая модель — реальный `useEffect`/`window.addEventListener`
+  непроверяем в vitest-окружении `"node"` без jsdom, задокументировано в файле теста).
