@@ -11,9 +11,19 @@ on:
         description: "Ветка или тег для сборки"
         required: false
         default: ""
+      arch:
+        description: "universal (arm64+x86_64, ждёт macos-latest) или x86_64 (только Intel-раннер, без очереди на arm64)"
+        required: false
+        type: choice
+        default: universal
+        options:
+          - universal
+          - x86_64
 
 jobs:
   build:
+    # universal-сборка собирается, только если явно не попросили x86_64-only.
+    if: ${{ inputs.arch != 'x86_64' }}
     # Нужен второй job: x86_64-префикс mpv для lipo (см. комментарий ниже).
     needs: libmpv-x86_64
     runs-on: macos-latest
@@ -162,10 +172,121 @@ jobs:
           path: src-tauri/target/universal-apple-darwin/debug/bundle/macos/KinoBox.app
           retention-days: 14
 
+  # x86_64-only: та же сборка, но без universal/lipo и без второго раннера —
+  # весь процесс на одном Intel-раннере (macos-13). Для разработчика на Intel
+  # Mac, которому важен быстрый прогон без очереди на macos-latest (arm64).
+  # Не публикуется в release.yml — только этот ручной workflow.
+  build-x86_64:
+    if: ${{ inputs.arch == 'x86_64' }}
+    runs-on: macos-13
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 9
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-apple-darwin
+
+      - name: Setup Go (wreq/BoringSSL build)
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-build-x86_64-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install UI dependencies
+        run: pnpm --dir ui install --frozen-lockfile
+
+      - name: Install tauri-cli
+        run: cargo install tauri-cli --version "^2.0" --locked
+
+      - name: Install mpv (x86_64 bottle)
+        run: brew install mpv
+
+      - name: Build x86_64 binary (no bundle)
+        run: cargo tauri build --debug --target x86_64-apple-darwin --no-bundle
+        working-directory: src-tauri
+
+      # Single-arch вендоринг: та же идея, что и universal-путь (стейджинг
+      # вне .app, @rpath), но без lipo — просто копируем бутылку как есть.
+      - name: Vendor single-arch libmpv (staging outside .app)
+        run: |
+          scripts/vendor-libmpv.sh \
+            "$(brew --prefix mpv)" \
+            "$(brew --prefix mpv)" \
+            "$RUNNER_TEMP/vendored-libmpv"
+
+      - name: Patch binary in cargo target dir
+        run: |
+          scripts/patch-app-binary.sh \
+            "src-tauri/target/x86_64-apple-darwin/debug/KinoBox"
+
+      - name: Write tauri.macos.conf.json (frameworks from staging)
+        run: |
+          set -euo pipefail
+          STAGE="$RUNNER_TEMP/vendored-libmpv"
+          {
+            echo '{"bundle":{"macOS":{"frameworks":['
+            first=1
+            while IFS= read -r name; do
+              [[ -n "$name" ]] || continue
+              [[ $first -eq 0 ]] && echo -n ","
+              echo -n "\"$STAGE/$name\""
+              first=0
+            done < "$STAGE/.manifest"
+            echo ']}}}'
+          } > src-tauri/tauri.macos.conf.json
+          cat src-tauri/tauri.macos.conf.json
+
+      - name: Build x86_64 .app
+        run: cargo tauri build --debug --target x86_64-apple-darwin --bundles app
+        working-directory: src-tauri
+
+      - name: Verify vendored libmpv
+        run: |
+          set -euo pipefail
+          APP=src-tauri/target/x86_64-apple-darwin/debug/bundle/macos/KinoBox.app
+          lipo -info "$APP/Contents/Frameworks/libmpv.2.dylib"
+          otool -L "$APP/Contents/MacOS/KinoBox"
+          otool -l "$APP/Contents/MacOS/KinoBox" | grep -A2 LC_RPATH
+          if otool -L "$APP/Contents/MacOS/KinoBox" "$APP"/Contents/Frameworks/*.dylib \
+              | grep -E "/(opt/homebrew|usr/local)/"; then
+            echo "ERROR: absolute Homebrew paths survived bundling" >&2
+            exit 1
+          fi
+
+      - name: Upload .app
+        uses: actions/upload-artifact@v4
+        with:
+          name: KinoBox-debug-x86_64
+          path: src-tauri/target/x86_64-apple-darwin/debug/bundle/macos/KinoBox.app
+          retention-days: 14
+
   # Вторая архитектура libmpv: на Intel-раннере Homebrew ставит x86_64-бутылки
   # в /usr/local. Кладём весь префикс mpv (dylib + зависимости) артефактом —
   # vendoring-скрипт соберёт из двух префиксов universal-файлы.
   libmpv-x86_64:
+    if: ${{ inputs.arch != 'x86_64' }}
     runs-on: macos-13
     steps:
       - name: Install mpv (x86_64 bottle)

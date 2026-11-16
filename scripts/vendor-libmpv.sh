@@ -23,6 +23,11 @@
 # Использование:
 #   scripts/vendor-libmpv.sh <arm64-префикс-mpv> <x86_64-префикс-mpv> <стейдж-каталог>
 #
+# Если оба префикса совпадают (один путь дважды) — single-arch режим: вместо
+# lipo -create (упал бы на "same architecture specified multiple times" для
+# двух идентичных thin-файлов) файлы просто копируются как есть. Так вызывает
+# build-dev.yml для x86_64-only сборки (без второго arm64-раннера).
+#
 # Пример (см. workflows):
 #   scripts/vendor-libmpv.sh /opt/homebrew/opt/mpv "$RUNNER_TEMP/libmpv-x86_64/mpv" \
 #     "$RUNNER_TEMP/vendored-libmpv"
@@ -97,7 +102,12 @@ while IFS= read -r name; do
     continue
   fi
   out="$STAGE/$name"
-  lipo -create -output "$out" "$arm_lib" "$intel_lib"
+  if [[ "$ARM_PREFIX" == "$INTEL_PREFIX" ]]; then
+    cp "$arm_lib" "$out"
+    chmod +w "$out"
+  else
+    lipo -create -output "$out" "$arm_lib" "$intel_lib"
+  fi
   install_name_tool -id "@rpath/$name" "$out"
 done < "$DEP_LIST"
 
