@@ -64,37 +64,61 @@ fi
 rm -rf "$STAGE"
 mkdir -p "$STAGE"
 
-DEP_LIST="$(mktemp)"
-DEP_QUEUE="$(mktemp)"
-trap 'rm -f "$DEP_LIST" "$DEP_QUEUE"' EXIT
-printf '%s\n' "$MPV_DYLIB" > "$DEP_LIST"
-printf '%s\n' "$MPV_DYLIB" > "$DEP_QUEUE"
+# ВАЖНО: зависимости libmpv (libass, ffmpeg, libplacebo, …) — это ОТДЕЛЬНЫЕ
+# Homebrew-формулы, каждая со своим собственным opt-префиксом
+# (/usr/local/opt/libass/lib/…, /opt/homebrew/opt/ffmpeg/lib/…), а НЕ файлы
+# внутри "$ARM_PREFIX/lib"/"$INTEL_PREFIX/lib" (там лежит только сам
+# libmpv.2.dylib). Поэтому обход зависимостей идёт по АБСОЛЮТНЫМ путям,
+# которые Homebrew уже записал в load commands (otool -L) — они валидны на
+# диске как есть, реконструировать их из "$prefix/lib/$name" нельзя.
+ARM_MAP="$(mktemp)"
+INTEL_MAP="$(mktemp)"
+ALL_NAMES="$(mktemp)"
+trap 'rm -f "$ARM_MAP" "$INTEL_MAP" "$ALL_NAMES"' EXIT
 
-# BFS от libmpv.dylib по обоим префиксам: имена всех dylib, поставленных
-# Homebrew для mpv. Системные (/usr/lib, /System) пропускаются — dyld найдёт
-# их сам; берём только то, что реально лежит в префиксе mpv.
-while IFS= read -r name; do
-  for prefix in "$ARM_PREFIX" "$INTEL_PREFIX"; do
-    lib_p="$prefix/lib/$name"
-    [[ -f "$lib_p" ]] || continue
+# Обходит дерево зависимостей одного префикса по абсолютным путям из otool -L.
+# Пишет в map_file строки "имя<TAB>абсолютный_путь". Системные пути
+# (/usr/lib, /System) пропускаются — dyld найдёт их сам без вендоринга.
+walk_deps() {
+  local map_file="$1" seed="$2" queue file dep dep_name
+  queue="$(mktemp)"
+  printf '%s\n' "$seed" > "$queue"
+  printf '%s\t%s\n' "$(basename "$seed")" "$seed" >> "$map_file"
+  while IFS= read -r file; do
     while IFS= read -r dep; do
+      case "$dep" in
+        /usr/lib/*|/System/*|@rpath/*|@loader_path/*|@executable_path/*) continue ;;
+      esac
+      [[ -f "$dep" ]] || continue
       dep_name="$(basename "$dep")"
-      grep -qx "$dep_name" "$DEP_LIST" && continue
-      if [[ -f "$ARM_PREFIX/lib/$dep_name" || -f "$INTEL_PREFIX/lib/$dep_name" ]]; then
-        printf '%s\n' "$dep_name" >> "$DEP_LIST"
-        printf '%s\n' "$dep_name" >> "$DEP_QUEUE"
-      fi
-    done < <(otool -L "$lib_p" | tail -n +2 | awk '{print $1}')
-  done
-done < "$DEP_QUEUE"
+      awk -F'\t' -v n="$dep_name" '$1==n{found=1} END{exit !found}' "$map_file" && continue
+      printf '%s\t%s\n' "$dep_name" "$dep" >> "$map_file"
+      printf '%s\n' "$dep" >> "$queue"
+    done < <(otool -L "$file" | tail -n +2 | awk '{print $1}')
+  done < "$queue"
+  rm -f "$queue"
+}
+
+walk_deps "$ARM_MAP" "$ARM_PREFIX/lib/$MPV_DYLIB"
+if [[ "$ARM_PREFIX" == "$INTEL_PREFIX" ]]; then
+  cp "$ARM_MAP" "$INTEL_MAP"
+else
+  walk_deps "$INTEL_MAP" "$INTEL_PREFIX/lib/$MPV_DYLIB"
+fi
+
+map_lookup() {
+  awk -F'\t' -v n="$2" '$1==n{print $2; found=1} END{exit !found}' "$1"
+}
+
+cut -f1 "$ARM_MAP" "$INTEL_MAP" | sort -u > "$ALL_NAMES"
 
 # Универсализация: lipo сливает две Homebrew-бутылки (arm64 + x86_64) в один
 # Mach-O. install_name_tool -id делает библиотеку @rpath-адресуемой.
 skipped=0
 while IFS= read -r name; do
-  arm_lib="$ARM_PREFIX/lib/$name"
-  intel_lib="$INTEL_PREFIX/lib/$name"
-  if [[ ! -f "$arm_lib" || ! -f "$intel_lib" ]]; then
+  arm_lib="$(map_lookup "$ARM_MAP" "$name" || true)"
+  intel_lib="$(map_lookup "$INTEL_MAP" "$name" || true)"
+  if [[ -z "$arm_lib" || -z "$intel_lib" || ! -f "$arm_lib" || ! -f "$intel_lib" ]]; then
     # Такого файла нет в одной из бутылок — обычно системный фреймворк или
     # необязательная зависимость. Не тащим, чтобы не ломать бандл.
     echo "skip: $name (нет в обеих бутылках)"
@@ -109,7 +133,7 @@ while IFS= read -r name; do
     lipo -create -output "$out" "$arm_lib" "$intel_lib"
   fi
   install_name_tool -id "@rpath/$name" "$out"
-done < "$DEP_LIST"
+done < "$ALL_NAMES"
 
 # Заменяет любую ссылку, чей basename совпадает с вендоренным файлом, на
 # @rpath/<имя>. Работает и для абсолютных путей Homebrew (/opt/homebrew/lib/…),
