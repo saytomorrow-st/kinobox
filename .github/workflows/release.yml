@@ -92,7 +92,8 @@ jobs:
       # tauri-action собрать/подписать/упаковать бандл единственным проходом.
 
       # Сборка бинаря в target dir без бандла: нам нужен только файл
-      # src-tauri/target/universal-apple-darwin/release/KinoBox для патча.
+      # target/universal-apple-darwin/release/KinoBox для патча. Путь — от
+      # корня cargo workspace (src-tauri — член workspace), не от src-tauri/.
       - name: Build universal binary (no bundle)
         run: cargo tauri build --target universal-apple-darwin --no-bundle
         working-directory: src-tauri
@@ -113,7 +114,7 @@ jobs:
       - name: Patch binary in cargo target dir
         run: |
           scripts/patch-app-binary.sh \
-            "src-tauri/target/universal-apple-darwin/release/KinoBox"
+            "target/universal-apple-darwin/release/KinoBox"
 
       # bundle.macOS.frameworks — абсолютные пути к dylib в стейджинге (НЕ внутри
       # .app). Список берём из .manifest, который пишет vendor-libmpv.sh.
@@ -157,7 +158,7 @@ jobs:
       - name: Verify vendored libmpv
         run: |
           set -euo pipefail
-          APP=src-tauri/target/universal-apple-darwin/release/bundle/macos/KinoBox.app
+          APP=target/universal-apple-darwin/release/bundle/macos/KinoBox.app
           lipo -info "$APP/Contents/Frameworks/libmpv.2.dylib"
           otool -L "$APP/Contents/MacOS/KinoBox"
           otool -l "$APP/Contents/MacOS/KinoBox" | grep -A2 LC_RPATH

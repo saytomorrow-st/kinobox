@@ -107,7 +107,9 @@ jobs:
       # собираем бандл единственным проходом.
 
       # Сборка бинаря в target dir без бандла: нужен только файл
-      # src-tauri/target/universal-apple-darwin/debug/KinoBox для патча.
+      # target/universal-apple-darwin/debug/KinoBox для патча. Путь к target dir
+      # идёт от корня cargo workspace (src-tauri — член workspace, не отдельный
+      # крейт), а не от src-tauri/ — несмотря на working-directory: src-tauri.
       - name: Build universal binary (no bundle)
         run: cargo tauri build --debug --target universal-apple-darwin --no-bundle
         working-directory: src-tauri
@@ -127,7 +129,7 @@ jobs:
       - name: Patch binary in cargo target dir
         run: |
           scripts/patch-app-binary.sh \
-            "src-tauri/target/universal-apple-darwin/debug/KinoBox"
+            "target/universal-apple-darwin/debug/KinoBox"
 
       # bundle.macOS.frameworks — абсолютные пути к dylib в стейджинге (НЕ внутри
       # .app). Список берём из .manifest, который пишет vendor-libmpv.sh.
@@ -159,7 +161,7 @@ jobs:
       - name: Verify vendored libmpv
         run: |
           set -euo pipefail
-          APP=src-tauri/target/universal-apple-darwin/debug/bundle/macos/KinoBox.app
+          APP=target/universal-apple-darwin/debug/bundle/macos/KinoBox.app
           lipo -info "$APP/Contents/Frameworks/libmpv.2.dylib"
           otool -L "$APP/Contents/MacOS/KinoBox"
           otool -l "$APP/Contents/MacOS/KinoBox" | grep -A2 LC_RPATH
@@ -173,7 +175,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: KinoBox-debug-universal
-          path: src-tauri/target/universal-apple-darwin/debug/bundle/macos/KinoBox.app
+          path: target/universal-apple-darwin/debug/bundle/macos/KinoBox.app
           retention-days: 14
 
   # x86_64-only: та же сборка, но без universal/lipo и без второго раннера —
@@ -247,7 +249,7 @@ jobs:
       - name: Patch binary in cargo target dir
         run: |
           scripts/patch-app-binary.sh \
-            "src-tauri/target/x86_64-apple-darwin/debug/KinoBox"
+            "target/x86_64-apple-darwin/debug/KinoBox"
 
       - name: Write tauri.macos.conf.json (frameworks from staging)
         run: |
@@ -273,7 +275,7 @@ jobs:
       - name: Verify vendored libmpv
         run: |
           set -euo pipefail
-          APP=src-tauri/target/x86_64-apple-darwin/debug/bundle/macos/KinoBox.app
+          APP=target/x86_64-apple-darwin/debug/bundle/macos/KinoBox.app
           lipo -info "$APP/Contents/Frameworks/libmpv.2.dylib"
           otool -L "$APP/Contents/MacOS/KinoBox"
           otool -l "$APP/Contents/MacOS/KinoBox" | grep -A2 LC_RPATH
@@ -287,7 +289,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: KinoBox-debug-x86_64
-          path: src-tauri/target/x86_64-apple-darwin/debug/bundle/macos/KinoBox.app
+          path: target/x86_64-apple-darwin/debug/bundle/macos/KinoBox.app
           retention-days: 14
 
   # Вторая архитектура libmpv: на Intel-раннере Homebrew ставит x86_64-бутылки
