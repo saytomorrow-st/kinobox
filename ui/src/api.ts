@@ -28,6 +28,15 @@ export type {
   UserDto,
 };
 
+// `specta` не видит типы, которые используются только в сырых событиях (`emit_to`), а не в
+// сигнатурах команд — `player-progress` в bindings.ts не генерируется. Дублируем вручную,
+// зеркалируя `PlayerProgressDto` из `crates/kino-ipc/src/dto.rs` (camelCase через serde).
+export type PlayerProgressDto = {
+  position: number | null;
+  duration: number | null;
+  paused: boolean;
+};
+
 export type Outcome<T> = { ok: true; value: T } | { ok: false; error: IpcError };
 
 export interface Api {
@@ -48,7 +57,14 @@ export interface Api {
     translatorId: TranslatorId | null,
     episode: EpisodeDto | null,
   ): Promise<Outcome<StreamQualityDto[]>>;
-  playerLoad(quality: StreamQualityDto): Promise<Outcome<null>>;
+  playerLoad(quality: StreamQualityDto, qualities: StreamQualityDto[]): Promise<Outcome<null>>;
+  playerQualities(): Promise<Outcome<StreamQualityDto[]>>;
+  playerPlay(): Promise<Outcome<null>>;
+  playerPause(): Promise<Outcome<null>>;
+  playerSeek(seconds: number): Promise<Outcome<null>>;
+  playerSetQuality(quality: StreamQualityDto): Promise<Outcome<null>>;
+  playerSetVolume(volume: number): Promise<Outcome<null>>;
+  playerStop(): Promise<Outcome<null>>;
   quit(): Promise<void>;
 }
 
@@ -102,7 +118,14 @@ export const tauriApi: Api = {
   details: (item) => call(() => commands.details(item)),
   episodes: (details) => call(() => commands.episodes(details)),
   streams: (item, translatorId, episode) => call(() => commands.streams(item, translatorId, episode)),
-  playerLoad: (quality) => call(() => commands.playerLoad(quality)),
+  playerLoad: (quality, qualities) => call(() => commands.playerLoad(quality, qualities)),
+  playerQualities: () => call(() => commands.playerQualities()),
+  playerPlay: () => call(() => commands.playerPlay()),
+  playerPause: () => call(() => commands.playerPause()),
+  playerSeek: (seconds) => call(() => commands.playerSeek(seconds)),
+  playerSetQuality: (quality) => call(() => commands.playerSetQuality(quality)),
+  playerSetVolume: (volume) => call(() => commands.playerSetVolume(volume)),
+  playerStop: () => call(() => commands.playerStop()),
   quit: async () => {
     try {
       await commands.quit();

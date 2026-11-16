@@ -31,9 +31,12 @@ export const commands = {
 	/**
 	 *  Открывает окно плеера, привязывает рендер и загружает качество как новый файл (полная
 	 *  перезагрузка, позиция не сохраняется — это старт просмотра). Повторный вызов с уже открытым
-	 *  плеером только переключает файл, не пересоздавая `WindowedPlayer`.
+	 *  плеером только переключает файл, не пересоздавая `WindowedPlayer`. `qualities` — полный список
+	 *  доступных качеств (из `streams`), запоминается для `player_qualities`: окно `player-controls`
+	 *  не может прочитать стор главного окна (отдельная JS-среда), поэтому список приходит и
+	 *  хранится здесь, а не передаётся напрямую.
 	 */
-	playerLoad: (quality: StreamQualityDto, options?: InvokeOptions) => typedError<null, IpcError>(__TAURI_INVOKE("player_load", { quality }, options)),
+	playerLoad: (quality: StreamQualityDto, qualities: StreamQualityDto[], options?: InvokeOptions) => typedError<null, IpcError>(__TAURI_INVOKE("player_load", { quality, qualities }, options)),
 	playerPlay: (options?: InvokeOptions) => typedError<null, IpcError>(__TAURI_INVOKE("player_play", undefined, options)),
 	playerPause: (options?: InvokeOptions) => typedError<null, IpcError>(__TAURI_INVOKE("player_pause", undefined, options)),
 	playerSeek: (seconds: number | null, options?: InvokeOptions) => typedError<null, IpcError>(__TAURI_INVOKE("player_seek", { seconds }, options)),
@@ -48,6 +51,11 @@ export const commands = {
 	 *  в обработчике события окна на главном потоке.
 	 */
 	playerStop: (options?: InvokeOptions) => typedError<null, IpcError>(__TAURI_INVOKE("player_stop", undefined, options)),
+	/**
+	 *  Список качеств, сохранённый последним `player_load` — читает окно `player-controls`, у
+	 *  которого нет доступа к стору главного окна (отдельная JS-среда).
+	 */
+	playerQualities: (options?: InvokeOptions) => typedError<StreamQualityDto[], IpcError>(__TAURI_INVOKE("player_qualities", undefined, options)),
 };
 
 /* Types */

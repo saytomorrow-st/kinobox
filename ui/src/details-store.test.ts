@@ -72,6 +72,13 @@ function fakeApi(overrides: Partial<Api> = {}): Api {
     episodes: async () => ({ ok: false, error: { kind: "internal", message: "не вызывается" } }),
     streams: async () => ({ ok: false, error: { kind: "internal", message: "не вызывается" } }),
     playerLoad: async () => ({ ok: false, error: { kind: "internal", message: "не вызывается" } }),
+    playerQualities: async () => ({ ok: false, error: { kind: "internal", message: "не вызывается" } }),
+    playerPlay: async () => ({ ok: false, error: { kind: "internal", message: "не вызывается" } }),
+    playerPause: async () => ({ ok: false, error: { kind: "internal", message: "не вызывается" } }),
+    playerSeek: async () => ({ ok: false, error: { kind: "internal", message: "не вызывается" } }),
+    playerSetQuality: async () => ({ ok: false, error: { kind: "internal", message: "не вызывается" } }),
+    playerSetVolume: async () => ({ ok: false, error: { kind: "internal", message: "не вызывается" } }),
+    playerStop: async () => ({ ok: false, error: { kind: "internal", message: "не вызывается" } }),
     quit: async () => {},
     ...overrides,
   };
@@ -357,7 +364,7 @@ describe("play", () => {
     await store.getState().play();
 
     expect(streamsSpy).toHaveBeenCalledWith(film, 1, null);
-    expect(playerLoadSpy).toHaveBeenCalledWith(quality());
+    expect(playerLoadSpy).toHaveBeenCalledWith(quality(), [quality()]);
     expect(store.getState()).toMatchObject({ launching: false, open: false, launchError: null });
   });
 
@@ -378,7 +385,7 @@ describe("play", () => {
     await store.getState().play();
 
     expect(streamsSpy).toHaveBeenCalledWith(series, 1, seriesEpisodes[3]);
-    expect(playerLoadSpy).toHaveBeenCalledWith(quality());
+    expect(playerLoadSpy).toHaveBeenCalledWith(quality(), [quality()]);
     expect(store.getState()).toMatchObject({ launching: false, open: false, launchError: null });
   });
 

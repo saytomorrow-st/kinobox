@@ -36,11 +36,12 @@ pub type Service = AppService<KeychainSecretStore, MemoryMirrorStore>;
 | `details` | `(item) -> Result<MediaDetailsDto, IpcError>` | без изменений |
 | `episodes` | `(details) -> Result<Vec<EpisodeDto>, IpcError>` | без изменений |
 | `streams` | `(item, translatorId, episode) -> Result<Vec<StreamQualityDto>, IpcError>` | раскрывает `Option<TranslatorId>` в `Option<u64>` (`.map(\|id\| id.0)`); детали перезапрашиваются внутри сервиса |
-| `player_load` | `(quality) -> Result<(), IpcError>` | открывает окно плеера, привязывает рендер, грузит качество как **новый файл** (`Player::load_quality`) — позиция не сохраняется |
+| `player_load` | `(quality, qualities) -> Result<(), IpcError>` | открывает окно плеера, привязывает рендер, грузит качество как **новый файл** (`Player::load_quality`) — позиция не сохраняется; `qualities` — полный список доступных качеств (из `streams`), сохраняется в `PlayerState` для `player_qualities` |
+| `player_qualities` | `() -> Result<Vec<StreamQualityDto>, IpcError>` | отдаёт список качеств, сохранённый последним `player_load` — читает окно `player-controls`, у которого нет доступа к стору главного окна |
 | `player_play` / `player_pause` | `() -> Result<(), IpcError>` | `Player::play` / `Player::pause` |
-| `player_seek` | `(seconds) -> Result<(), IpcError>` | `Player::seek_to` |
+| `player_seek` | `(seconds: f64) -> Result<(), IpcError>` | `Player::seek_to` |
 | `player_set_quality` | `(quality) -> Result<(), IpcError>` | **сохраняет позицию** (`Player::switch_quality`), только когда плеер уже играет то же произведение |
-| `player_set_volume` | `(volume) -> Result<(), IpcError>` | `Player::set_volume` |
+| `player_set_volume` | `(volume: f64) -> Result<(), IpcError>` | `Player::set_volume` |
 | `player_stop` | `() -> Result<(), IpcError>` | закрывает окно `player`; очистка плеера происходит в обработчике события окна |
 
 Логика окон нигде не дублируется: обе точки входа (`boot`, `login`) используют `windows::enter_main`,
@@ -48,11 +49,17 @@ pub type Service = AppService<KeychainSecretStore, MemoryMirrorStore>;
 
 ### Плеер (`player_state.rs`, `commands.rs`)
 
-`WindowedPlayer` (владеющий `Player` + рендер-контекст) живёт в `PlayerState(Arc<Mutex<Option<WindowedPlayer>>>)`
-и реализует только `Send`, не `Sync` — поэтому состояние сериализуется `Mutex`. Он привязывается к `NSView`
-окна `player` на главном потоке (`run_on_main_thread` + `oneshot`), а очистка (`*lock = None`) происходит в
+`WindowedPlayer` (владеющий `Player` + рендер-контекст) живёт в первом поле двухполевого кортежного
+`PlayerState(Arc<Mutex<Option<WindowedPlayer>>>, Arc<Mutex<Vec<StreamQualityDto>>>)` и реализует только
+`Send`, не `Sync` — поэтому состояние сериализуется `Mutex`. Он привязывается к `NSView` окна `player`
+на главном потоке (`run_on_main_thread` + `oneshot`), а очистка (`*lock = None`) происходит в
 обработчике события окна (`CloseRequested`/`Destroyed`) — снова на главном потоке, где доставляются события.
 Воспроизведение останавливается автоматически, утечек mpv/рендера нет.
+
+Второе поле — список качеств последнего `player_load` (`set_qualities`/`qualities`). Нужен отдельно от
+`WindowedPlayer`, потому что окно `player-controls` — отдельная JS-среда без доступа к стору главного
+окна: полный список качеств (из `streams`) передаётся в `player_load` и оседает здесь, а `player_qualities`
+отдаёт его обратно по запросу контролов.
 
 Фоновый поток прогресса (`start_progress_thread`) опрашивает события mpv (`next_event(0.1)`) и эмиттит снимок
 `PlayerProgressDto` в окно `player-controls` событием `player-progress` (сырой `tauri::Emitter::emit_to`,
@@ -130,9 +137,11 @@ JSON-схемы команд. Повторный запуск детермини
 
 `capabilities/default.json` — минимальный набор прав: только команды приложения
 (`allow-boot`, `allow-login`, …, `allow-catalog`, `allow-search`, `allow-details`, `allow-episodes`,
-`allow-streams`, `allow-player-*`) и `core:window:allow-start-dragging`
-(для перетаскивания окна без системной рамки через `data-tauri-drag-region`). Никаких плагинов
-`fs`/`shell`/`http`/`opener`.
+`allow-streams`, `allow-player-*`, `allow-player-qualities`), `core:window:allow-start-dragging`
+(для перетаскивания окна без системной рамки через `data-tauri-drag-region`),
+`core:window:allow-set-ignore-cursor-events` (клик-проходимость прозрачной зоны `player-controls` —
+#024) и `core:event:allow-listen`/`core:event:allow-unlisten` (подписка `player-controls` на
+`player-progress`). Никаких плагинов `fs`/`shell`/`http`/`opener`.
 
 Окна `player` и `player-controls` добавлены в массив `windows` этой capability, иначе Tauri не
 пропускал бы к ним IPC (включая событие `player-progress`).

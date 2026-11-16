@@ -22,6 +22,7 @@ const COMMANDS: &[&str] = &[
     "player_set_quality",
     "player_set_volume",
     "player_stop",
+    "player_qualities",
 ];
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
