@@ -1,0 +1,30 @@
+[package]
+name = "kinobox-app"
+description = "Оболочка Tauri: окна, регистрация команд kino-ipc, привязки TypeScript"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+build = "build.rs"
+default-run = "KinoBox"
+
+[lib]
+name = "kinobox_app"
+path = "src/lib.rs"
+
+[[bin]]
+name = "KinoBox"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build.workspace = true
+
+[dependencies]
+kino-ipc.workspace = true
+kino-player.workspace = true
+kino-core.workspace = true
+tauri.workspace = true
+tauri-specta.workspace = true
+specta.workspace = true
+specta-typescript.workspace = true
+tokio = { workspace = true, features = ["sync"] }

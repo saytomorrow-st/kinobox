@@ -1,0 +1,42 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/kino-core",
+    "crates/kino-api",
+    "crates/kino-player",
+    "crates/kino-store",
+    "crates/kino-ipc",
+    "src-tauri",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.98"
+license = "MIT"
+
+[workspace.dependencies]
+serde = { version = "=1.0.229", features = ["derive"] }
+url = { version = "=2.5.8", features = ["serde"] }
+serde_json = "=1.0.154"
+thiserror = "=2.0.21"
+base64 = "=0.23.1"
+pollster = { version = "=1.0.1", default-features = false }
+wreq = { version = "=0.16.3", features = ["cookies", "form", "gzip"] }
+tokio = { version = "=1.54.1", default-features = false }
+wiremock = "=0.6.5"
+futures-util = { version = "=0.3.34", default-features = false, features = ["alloc"] }
+keyring = "=4.2.0"
+rpassword = "=7.5.5"
+scraper = { version = "=0.29.0", default-features = false }
+tauri = { version = "=2.12.5", default-features = false, features = ["wry", "compression", "macos-private-api", "unstable"] }
+tauri-build = "=2.7.4"
+tauri-specta = { version = "=2.0.0-rc.29", features = ["derive", "typescript"] }
+specta = { version = "=2.0.0-rc.28", features = ["derive", "function"] }
+specta-typescript = "=0.0.15"
+
+kino-core = { path = "crates/kino-core" }
+kino-api = { path = "crates/kino-api" }
+kino-player = { path = "crates/kino-player" }
+kino-store = { path = "crates/kino-store" }
+kino-ipc = { path = "crates/kino-ipc" }

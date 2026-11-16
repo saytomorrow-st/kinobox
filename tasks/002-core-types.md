@@ -1,7 +1,7 @@
 ---
 id: 002
 type: feature
-status: open
+status: review
 model: deepseek-flash
 crate: kino-core
 created: 2026-11-13
@@ -26,3 +26,9 @@ created: 2026-11-13
 ## Заметки
 
 Зависит от #001.
+
+2026-11-13: типы готовы, 10 serde round-trip тестов, `check`/`test`/`fmt`/`clippy`/aarch64 зелёные.
+- Зависимости зафиксированы точными версиями: `serde =1.0.229`, `url =2.5.8`, `serde_json =1.0.154` (только dev).
+- `Translator` и `Season` добавлены как вложенные типы `MediaDetails`.
+- Домены в тестовых URL (`hdrezka.ag`) условные, на логику не влияют.
+- PR #2 открыт поверх ветки #001 (PR #1). После мержа #1 сменить базу на `main`.

@@ -1,7 +1,7 @@
 ---
 id: 003
 type: feature
-status: open
+status: review
 model: claude-sonnet-5
 crate: kino-core
 created: 2026-11-13
@@ -26,3 +26,9 @@ created: 2026-11-13
 ## Заметки
 
 Зависит от #002. Любое изменение границ между крейтами согласуется с заказчиком.
+
+2026-11-13: `KinoError`, `CatalogQuery`, `StreamRequest`, `KinoProvider` готовы. 19 тестов `kino-core`, `check`/`fmt`/`clippy`/aarch64 зелёные.
+- Зависимости зафиксированы: `thiserror =2.0.21`, `pollster =1.0.1` (dev, без default-features).
+- Трейт не object-safe (`impl Future` в возвращаемых типах), поэтому `kino-ipc` использует его как generic-параметр, не `dyn KinoProvider`.
+- `rust-version = 1.82` не проверялась на самом 1.82: сборка шла на stable (cargo 1.100.0). Проверить в CI отдельным job при необходимости.
+- PR #3 открыт поверх ветки #002 (PR #2). После мержа #1 и #2 сменить базу на `main`.

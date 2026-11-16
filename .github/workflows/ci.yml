@@ -4,44 +4,128 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  check:
+  rust:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-      
+          targets: x86_64-apple-darwin,aarch64-apple-darwin
+
+      - name: Setup Go (wreq/BoringSSL build)
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Install mpv (libmpv for kino-player)
+        # HOMEBREW_NO_BUILD_FROM_SOURCE делает отсутствие готовой bottle явной ошибкой шага,
+        # а не многочасовой компиляцией зависимостей (например llvm) из исходников на раннере.
+        # `brew --prefix`/lib не входит в путь поиска `cc` по умолчанию — без LIBRARY_PATH
+        # линковка `-lmpv` падает с "library 'mpv' not found", хотя сама bottle установлена.
+        run: |
+          HOMEBREW_NO_BUILD_FROM_SOURCE=1 brew install mpv
+          echo "LIBRARY_PATH=$(brew --prefix)/lib:${LIBRARY_PATH:-}" >> "$GITHUB_ENV"
+
       - name: Cache cargo
         uses: actions/cache@v4
         with:
           path: |
-            ~/.cargo/bin/
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-      
+
       - name: Format check
         run: cargo fmt --all -- --check
-      
+
       - name: Clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
-      
-      - name: Build
-        run: cargo build --release
-      
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
       - name: Test
-        run: cargo test --all-features
-      
-      - name: Doc
-        run: cargo doc --no-deps --all-features
+        run: cargo test --workspace
+
+      - name: Check (aarch64-apple-darwin)
+        run: cargo check --workspace --target aarch64-apple-darwin
+
+      - name: Check (x86_64-apple-darwin)
+        run: cargo check --workspace --target x86_64-apple-darwin
+
+  bindings:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup Go (wreq/BoringSSL build)
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Install mpv (libmpv for kino-player)
+        # kinobox-app линкует kino-player (через kino-ipc) даже в тестовом бинарнике
+        # export_bindings — без установленной bottle и LIBRARY_PATH линковка `-lmpv`
+        # падает с "library 'mpv' not found" (см. тот же шаг в job `rust`).
+        run: |
+          HOMEBREW_NO_BUILD_FROM_SOURCE=1 brew install mpv
+          echo "LIBRARY_PATH=$(brew --prefix)/lib:${LIBRARY_PATH:-}" >> "$GITHUB_ENV"
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-bindings-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Generate bindings.ts and check it is committed and deterministic
+        run: |
+          cargo test -p kinobox-app export_bindings
+          git diff --exit-code ui/src/bindings.ts
+          cargo test -p kinobox-app export_bindings
+          git diff --exit-code ui/src/bindings.ts
+
+  ui:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 9
+
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/pnpm/store
+          key: ${{ runner.os }}-pnpm-${{ hashFiles('ui/pnpm-lock.yaml') }}
+
+      - name: Install dependencies
+        run: pnpm --dir ui install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm --dir ui typecheck
+
+      - name: Test
+        run: pnpm --dir ui test
+
+      - name: Build
+        run: pnpm --dir ui build

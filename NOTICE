@@ -1,0 +1,68 @@
+KinoBox — уведомления о сторонних компонентах
+=============================================
+
+Этот файл обязателен для соблюдения лицензии библиотеки воспроизведения,
+встроенной в собранный KinoBox.app. Исходный код самого KinoBox — MIT
+(см. Cargo.toml, `license = "MIT"`); здесь речь только о сторонних бинарниках.
+
+
+## libmpv / mpv — LGPL-2.1
+
+KinoBox воспроизводит видео через **libmpv** — встраиваемую библиотеку
+медиаплеера [mpv](https://github.com/mpv-player/mpv).
+
+- Компонент: `libmpv` (в macOS-бандле — `Contents/Frameworks/libmpv.dylib`)
+- Лицензия: **GNU Lesser General Public License, версия 2.1 (LGPL-2.1)**,
+  текст: <https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html>
+- Исходный код: <https://github.com/mpv-player/mpv>
+- Rust-биндинги, через которые KinoBox вызывает `libmpv`:
+  [`libmpv2` / `libmpv-rs`](https://github.com/kohsine/libmpv-rs) (также LGPL-2.1)
+
+`libmpv` **связывается динамически** (не статически): в бандл кладётся отдельный
+файл `libmpv.dylib` (и его зависимости) в `Contents/Frameworks/`, а бинарь
+KinoBox ссылается на него через `@rpath`. Статическая линковка LGPL-библиотеки
+в KinoBox не выполняется.
+
+Условие LGPL-2.1 (п. 6) о замене библиотеки выполнено: ничто не препятствует
+заменить библиотеку своей версией.
+
+
+## Замена libmpv.dylib пользователем
+
+Пользователю **разрешено** заменить встроенную библиотеку на свою сборку
+`libmpv`, совместимую по ABI (mpv ≥ текущей версии плеера):
+
+1. Открыть `KinoBox.app` (правый клик → «Показать содержимое пакета»).
+2. Перейти в `Contents/Frameworks/`.
+3. Заменить `libmpv.dylib` своим файлом с тем же именем.
+
+KinoBox не проверяет подпись и хэш этого файла и не препятствует его замене.
+Если macOS блокирует запуск изменённого бандла (защита Gatekeeper/Hardened
+Runtime), бандл можно переподписать ad-hoc: `codesign --force --deep --sign -
+KinoBox.app`.
+
+Зависимости `libmpv` (ffmpeg и др.) также лежат в `Contents/Frameworks/`;
+при замене только `libmpv.dylib` следите за совместимостью их версий либо
+заменяйте полный набор dylib.
+
+
+## Откуда берутся бинарники в релизной сборке
+
+CI (`.github/workflows/build-dev.yml`, `.github/workflows/release.yml`) собирает
+universal (`arm64` + `x86_64`) `libmpv.dylib` через `lipo` из официальных
+Homebrew-бутылок `mpv` под каждую архитектуру (см. комментарии в workflow и
+`scripts/vendor-libmpv.sh`). Объектный код `libmpv` в репозитории KinoBox не
+модифицируется — только путь загрузки переписывается `install_name_tool` на
+`@rpath/libmpv.dylib`.
+
+
+## Прочие зависимости
+
+| Компонент | Лицензия |
+|---|---|
+| mpv / libmpv / libmpv2 (Rust-биндинги) | LGPL-2.1 |
+| Tauri | MIT / Apache-2.0 |
+| Rust crates (serde, tokio, wreq и др.) | см. `Cargo.lock`, MIT/Apache-2.0 |
+| React, Tailwind CSS | MIT |
+
+Если вы распространяете KinoBox дальше, сохраняйте этот файл и текст LGPL-2.1.

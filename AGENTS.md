@@ -54,26 +54,75 @@ KinoBox — это десктопный клиент HDrezka API. Онлайн-�
 
 ## Маршрутизация моделей (решай сам, без вопроса)
 
+По умолчанию — максимум на аутсорс. Сам (lead-агент) пишешь только
+архитектурный клей и делаешь ревью; почти вся остальная работа, включая
+то, что раньше считалось «сложным» (player/libmpv, async, анимации),
+уходит subagent'ам на `deepseek-v4-pro`. `claude-sonnet-5`/`opus` — только
+для решений, которые меняют границы крейтов, или когда дешёвая модель
+застряла.
+
 | Задача | Модель | Уровень |
 |---|---|---|
-| Планирование, архитектура, дизайн-система | `claude-sonnet-5` | high |
-| Rust: async, tokio, retry, зеркала | `claude-sonnet-5` | medium |
-| Rust: player, HLS, libmpv | `claude-sonnet-5` | medium |
+| Архитектурные решения, меняющие границы крейтов | `claude-sonnet-5` | high |
+| Планирование спринта/milestone, дизайн-система | `deepseek-v4-pro` | medium |
+| Rust: async, tokio, retry, зеркала | `deepseek-v4-pro` | medium |
+| Rust: player, HLS, libmpv | `deepseek-v4-pro` | medium |
 | Rust: kino-api, парсинг, деобфускация | `deepseek-v4-pro` | medium |
-| UI: React, Tailwind, компоненты | `claude-sonnet-5` | medium |
-| UI: мелкие правки стилей | `deepseek-flash` | low |
-| Анимации, focus-навигация | `claude-sonnet-5` | high |
-| Тесты, фикстуры | `deepseek-flash` | low |
-| Boilerplate, типы, serde | `deepseek-flash` | low |
+| UI: React, Tailwind, компоненты | `deepseek-v4-pro` | medium |
+| UI: мелкие правки стилей | `deepseek-v4-flash` | low |
+| Анимации, focus-навигация | `deepseek-v4-pro` | medium |
+| Тесты, фикстуры | `deepseek-v4-flash` | low |
+| Boilerplate, типы, serde | `deepseek-v4-flash` | low |
 | SQLite схема + миграции | `glm-5.3-flash` | low |
-| CI, release.yml, updater, конфиги | `deepseek-v4.1-flash-free` | low |
+| CI, release.yml, updater, конфиги | `deepseek-v4-flash` | low |
 | README, docs, changelog | `kimi-k3.1-pro` | low |
-| Ревью PR | `codex-auto-review` | low |
-| Anubis PoW, крипто-арифметика | `claude-opus-5-5` | high | 
+| Ревью PR (черновой проход) | `deepseek-v4-pro` | low |
+| Anubis PoW, крипто-арифметика | `claude-opus-5-5` | high |
 | Тяжёлые развилки (застрял >2 попыток) | `claude-opus-5-5` | high |
+
+Тесты и фикстуры — **всегда** `deepseek-v4-flash`, даже если фичу делала
+другая модель: отдельный subagent-проход только на тесты, не смешивать
+с реализацией.
+
+`codex-auto-review` и `deepseek-flash` — несуществующие ID, не использовать
+(верные: `deepseek-v4-pro`, `deepseek-v4-flash`). Финальное ревью PR всегда
+остаётся за lead-агентом (ты), даже если черновой проход сделал subagent.
 
 Делегирование: `subagent(agent: "general", model: "<модель>", prompt: "<задача + нужные файлы + ограничения>")`.
 Subagent получает свежий контекст — передавай ему выжимку, а не ссылку на контекст сеанса.
+
+## Ограничения окружения (обязательно включать в каждый delegation-prompt)
+
+Машина заказчика — слабый Intel Mac (i3-1000G4, 2 физических ядра, 8 ГБ ОЗУ,
+macOS 13.7.8). На ней:
+
+- **Запрещено `brew install mpv` и любая попытка собрать `libmpv`/`mpv` из
+  исходников вручную** (`meson`/`ninja`/`cmake` напрямую), в том числе как
+  «обходной путь», чтобы проверить код из `kino-player` вживую. На этой машине
+  у `mpv` нет x86_64-бутылки в `homebrew-core` — сборка тянет полный граф
+  зависимостей вплоть до `llvm` и может идти часами, забивая единственные два
+  ядра. Если нужно реально прогнать `cargo test -p kino-player` (или что-либо
+  линкующее `-lmpv`) — это делает **CI** (`macos-latest`, Apple Silicon, там
+  есть готовая arm64-бутылка), а не локальная машина. Прецедент: 15.11.2026
+  subagent на задаче #017 собрал `libmpv.dylib` вручную, процесс (через всю
+  цепочку `cairo→harfbuzz→libass→libplacebo→luajit→llvm`) продолжал молотить
+  фоном почти 3 часа после завершения сессии subagent'а, пока lead-агент не
+  заметил и не убил его.
+- **Запрещены циклы повторных прогонов тестов** («на всякий случай запущу ещё
+  раз», «прогоню 3-4 раза для надёжности») — один прогон, зелёный — готово,
+  красный — чини и перезапускай осознанно, не вслепую по кругу.
+- Запрещены параллельные subagent-компиляции, `cargo tauri dev`/собранный
+  `.app`/бинарь `KinoBox`/`cargo run -p kinobox-app` (живой Keychain, живой
+  вход на HDrezka), полный `cargo tauri build --target universal-apple-darwin`
+  локально.
+- Universal-сборка, реальная линковка `libmpv`, запуск GUI — проверяются
+  **только через CI** (`gh pr checks`/`gh run list`, ждать `completed`), никогда
+  локальным запуском.
+
+Эти ограничения не наследуются subagent'ами автоматически — сессия subagent'а
+начинается с чистым контекстом. **Каждый раз**, когда делегируешь что-то
+касающееся `kino-player`/`libmpv`/тестов, прямо копируй этот раздел (или его
+суть) в промпт, а не ссылайся на него.
 
 ## Правила
 
