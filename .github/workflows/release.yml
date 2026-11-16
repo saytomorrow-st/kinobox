@@ -87,16 +87,14 @@ jobs:
       #   3. bundled .app собирается копированием бинаря из cargo target dir
       #      (copy_binaries_to_bundle), значит патчить надо именно источник в
       #      target dir, а стейджинг dylib держать вне .app.
-      # Отсюда: бинарь собираем один раз, патчим его в target dir, dylib готовим
-      # в $RUNNER_TEMP, указываем на них через bundle.macOS.frameworks — и даём
-      # tauri-action собрать/подписать/упаковать бандл единственным проходом.
-
-      # Сборка бинаря в target dir без бандла: нам нужен только файл
-      # target/universal-apple-darwin/release/KinoBox для патча. Путь — от
-      # корня cargo workspace (src-tauri — член workspace), не от src-tauri/.
-      - name: Build universal binary (no bundle)
-        run: cargo tauri build --target universal-apple-darwin --no-bundle
-        working-directory: src-tauri
+      #   4. tauri.macos.conf.json должен существовать ДО первой компиляции:
+      #      tauri-build следит за конфигами (rerun-if-changed) и при появлении
+      #      нового файла между --no-bundle и финальной сборкой триггерит
+      #      релинк, который стирает патч install_name_tool. Поэтому vendoring
+      #      и запись конфига идут первыми, компиляция — после них.
+      # Отсюда: dylib готовим в $RUNNER_TEMP, пишем bundle.macOS.frameworks,
+      # собираем бинарь один раз, патчим его в target dir — и даём tauri-action
+      # собрать/подписать/упаковать бандл единственным проходом без релинка.
 
       # lipo + install_name_tool: universal dylib-ы в стейджинг-каталог ВНЕ .app,
       # ссылки внутри них → @rpath. lipo -info и otool -L печатаются скриптом.
@@ -107,17 +105,9 @@ jobs:
             "$RUNNER_TEMP/libmpv-x86_64/mpv" \
             "$RUNNER_TEMP/vendored-libmpv"
 
-      # Патч бинаря В TARGET DIR (не внутри .app): LC_LOAD_DYLIB →
-      # @rpath/libmpv.2.dylib + LC_RPATH @executable_path/../Frameworks.
-      # Бандлер копирует этот файл в каждый новый .app, поэтому патч переживает
-      # любую пересборку бандла, включая ту, что делает tauri-action.
-      - name: Patch binary in cargo target dir
-        run: |
-          scripts/patch-app-binary.sh \
-            "target/universal-apple-darwin/release/KinoBox"
-
       # bundle.macOS.frameworks — абсолютные пути к dylib в стейджинге (НЕ внутри
-      # .app). Список берём из .manifest, который пишет vendor-libmpv.sh.
+      # .app). Список берём из .manifest, который пишет vendor-libmpv.sh. Файл
+      # должен появиться ДО первой компиляции (см. комментарий выше).
       - name: Write tauri.macos.conf.json (frameworks from staging)
         run: |
           set -euo pipefail
@@ -134,6 +124,23 @@ jobs:
             echo ']}}}'
           } > src-tauri/tauri.macos.conf.json
           cat src-tauri/tauri.macos.conf.json
+
+      # Сборка бинаря в target dir без бандла: нам нужен только файл
+      # target/universal-apple-darwin/release/KinoBox для патча. Путь — от
+      # корня cargo workspace (src-tauri — член workspace), не от src-tauri/.
+      - name: Build universal binary (no bundle)
+        run: cargo tauri build --target universal-apple-darwin --no-bundle
+        working-directory: src-tauri
+
+      # Патч бинаря В TARGET DIR (не внутри .app): LC_LOAD_DYLIB →
+      # @rpath/libmpv.2.dylib + LC_RPATH @executable_path/../Frameworks.
+      # Бандлер копирует этот файл в каждый новый .app, поэтому патч переживает
+      # любую пересборку бандла, включая ту, что делает tauri-action — при
+      # условии, что tauri.macos.conf.json (написанный выше) больше не меняется.
+      - name: Patch binary in cargo target dir
+        run: |
+          scripts/patch-app-binary.sh \
+            "target/universal-apple-darwin/release/KinoBox"
 
       # Единственный реальный проход сборки бандла: tauri-action вызывает
       # `tauri build` (бинарь уже пропатчен, dylib подхватятся из
