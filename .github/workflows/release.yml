@@ -9,13 +9,14 @@ jobs:
   # ---- Universal libmpv.dylib (#019) -------------------------------------
   # Источник — официальные Homebrew-бутылки mpv по архитектурам: одна бутылка
   # = одна архитектура, поэтому нужны два job'а (arm64 на macos-latest, x86_64
-  # на Intel-раннере macos-13), а universal-файлы сливаются через lipo уже на
-  # arm64-раннере до сборки бандла. Rosetta на arm64-раннере не даёт
-  # x86_64-бутылки в /usr/local, а сборка mpv из исходников на runner'е
-  # слишком долгая и хрупкая — поэтому готовые бутылки Homebrew.
+  # на Intel-раннере macos-15-intel, `macos-13` ретирован 04.12.2025), а
+  # universal-файлы сливаются через lipo уже на arm64-раннере до сборки
+  # бандла. Rosetta на arm64-раннере не даёт x86_64-бутылки в /usr/local, а
+  # сборка mpv из исходников на runner'е слишком долгая и хрупкая — поэтому
+  # готовые бутылки Homebrew.
   # ------------------------------------------------------------------------
   libmpv-x86_64:
-    runs-on: macos-13
+    runs-on: macos-15-intel
     steps:
       - name: Install mpv (x86_64 bottle)
         run: brew install mpv
@@ -65,7 +66,7 @@ jobs:
         with:
           go-version: "1.22"
 
-      - name: Download x86_64 libmpv (from macos-13 job)
+      - name: Download x86_64 libmpv (from macos-15-intel job)
         uses: actions/download-artifact@v4
         with:
           name: libmpv-x86_64

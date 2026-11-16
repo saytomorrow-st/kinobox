@@ -36,7 +36,7 @@ jobs:
       # Источник: официальные Homebrew-бутылки mpv под каждую архитектуру.
       # Одна бутылка — одна архитектура, поэтому на arm64-раннере (macos-latest)
       # нужна вторая, x86_64. Её достаём отдельным job'ом `libmpv-x86_64` на
-      # Intel-раннере `macos-13` (Rosetta на arm64-раннере даёт x86_64 *процессы*,
+      # Intel-раннере `macos-15-intel` (Rosetta на arm64-раннере даёт x86_64 *процессы*,
       # но Homebrew в /usr/local ставится нативно и бутылку под Intel там
       # получить существенно сложнее, чем взять готовый Intel-раннер) и
       # передаём между job'ами артефактом.
@@ -44,7 +44,7 @@ jobs:
       # а сборка mpv из исходников тянет meson/ffmpeg/libplacebo и занимает
       # десятки минут на runner — бутылки быстрее и воспроизводимее.
       # ---------------------------------------------------------------------
-      - name: Download x86_64 libmpv (from macos-13 job)
+      - name: Download x86_64 libmpv (from macos-15-intel job)
         uses: actions/download-artifact@v4
         with:
           name: libmpv-x86_64
@@ -173,12 +173,14 @@ jobs:
           retention-days: 14
 
   # x86_64-only: та же сборка, но без universal/lipo и без второго раннера —
-  # весь процесс на одном Intel-раннере (macos-13). Для разработчика на Intel
-  # Mac, которому важен быстрый прогон без очереди на macos-latest (arm64).
-  # Не публикуется в release.yml — только этот ручной workflow.
+  # весь процесс на одном Intel-раннере (macos-15-intel, `macos-13` ретирован
+  # 04.12.2025 и теперь просто висит в queued навечно вместо явного фейла).
+  # Для разработчика на Intel Mac, которому важен быстрый прогон без очереди
+  # на macos-latest (arm64). Не публикуется в release.yml — только этот
+  # ручной workflow.
   build-x86_64:
     if: ${{ inputs.arch == 'x86_64' }}
-    runs-on: macos-13
+    runs-on: macos-15-intel
     steps:
       - uses: actions/checkout@v4
         with:
@@ -287,7 +289,7 @@ jobs:
   # vendoring-скрипт соберёт из двух префиксов universal-файлы.
   libmpv-x86_64:
     if: ${{ inputs.arch != 'x86_64' }}
-    runs-on: macos-13
+    runs-on: macos-15-intel
     steps:
       - name: Install mpv (x86_64 bottle)
         run: brew install mpv
