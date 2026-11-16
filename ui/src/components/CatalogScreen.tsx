@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
-import { useCatalogStore } from "../store";
+import { useCatalogStore, useDetailsStore } from "../store";
+import { DetailsModal } from "./DetailsModal";
 import { HeroBanner } from "./HeroBanner";
 import { PosterRow } from "./PosterRow";
 
@@ -11,6 +12,8 @@ export function CatalogScreen() {
   const loading = useCatalogStore((state) => state.loading);
   const error = useCatalogStore((state) => state.error);
   const load = useCatalogStore((state) => state.load);
+  const detailsOpen = useDetailsStore((state) => state.open);
+  const openDetails = useDetailsStore((state) => state.openFor);
 
   const [focus, setFocus] = useState({ row: 0, col: 0 });
 
@@ -24,7 +27,9 @@ export function CatalogScreen() {
     Math.min(COLUMNS, Math.max(0, items.length - row * COLUMNS));
 
   useEffect(() => {
-    if (rowCount === 0) return;
+    // Модалка деталей открыта — навигация каталога по стрелкам приостановлена, она не теряет
+    // состояние (скролл/фокус ряда), просто не реагирует, пока модалка не закроется.
+    if (rowCount === 0 || detailsOpen) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "ArrowLeft") {
         event.preventDefault();
@@ -45,13 +50,13 @@ export function CatalogScreen() {
           return { row: nextRow, col: Math.min(prev.col, columnCount(nextRow)) };
         });
       } else if (event.key === "Enter") {
-        // Экран деталей (#023) ещё не готов — клик по карточке пока никуда не ведёт.
-        void items[focus.row * COLUMNS + focus.col];
+        const item = items[focus.row * COLUMNS + focus.col];
+        if (item) void openDetails(item);
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [items, rowCount, focus]);
+  }, [items, rowCount, focus, detailsOpen, openDetails]);
 
   if (loading && items.length === 0) {
     return (
@@ -89,10 +94,11 @@ export function CatalogScreen() {
           <PosterRow
             items={items.slice(start, end)}
             focusedIndex={focus.row === row ? focus.col : null}
-            onSelect={() => undefined}
+            onSelect={(item) => void openDetails(item)}
           />
         </div>
       ))}
+      <DetailsModal />
     </div>
   );
 }

@@ -1,8 +1,8 @@
 ---
 id: 023
 type: feature
-status: open
-model: claude-sonnet-5
+status: done
+model: claude-sonnet-5 + deepseek-v4-pro + deepseek-v4-flash
 crate: ui
 created: 2026-11-15
 ---
@@ -33,3 +33,15 @@ created: 2026-11-15
 
 Зависит от #020 (DTO деталей/серий), #022 (точка входа — клик по постеру). Не зависит от плеера
 напрямую, но кнопка ▶ становится полезной только после #021/#024.
+
+Сделано: `ui/src/details-store.ts` (архитектурный клей, лид) — zustand-стор с race-guard по токену
+запроса (устаревшие ответы `details`/`episodes` после повторного `openFor` отбрасываются), `play()`
+вызывает `streams(item, translatorId, episode)` → берёт качество `[0]` → `playerLoad(quality)`.
+`ui/src/api.ts` расширен методами `details`/`episodes`/`streams`/`playerLoad`.
+`ui/src/components/DetailsModal.tsx` (контейнер) + `DetailsView.tsx` (презентационный,
+deepseek-v4-pro) — full-screen оверлей, чипсы перевода, табы сезонов + список серий, кнопка
+«▶ Смотреть», Escape/клик-по-фону закрывают. `CatalogScreen.tsx` — Enter/клик по постеру открывают
+модалку, навигация стрелками приостановлена пока модалка открыта (фокус/скролл каталога не теряются).
+Тесты (`details-store.test.ts`, `DetailsView.test.tsx`, deepseek-v4-flash) + правки заглушек `Api` в
+трёх существующих *-store.test.ts (новые методы интерфейса). Все проверки зелёные: typecheck, test
+(81 passed), build, lint.

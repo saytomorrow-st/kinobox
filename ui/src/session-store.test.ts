@@ -17,6 +17,10 @@ function fakeApi(overrides: Partial<Api> = {}): Api {
     selectMirror: async () => ({ ok: false, error: { kind: "internal", message: "не вызывается" } }),
     catalog: async () => ({ ok: true, value: [] }),
     search: async () => ({ ok: true, value: [] }),
+    details: async () => ({ ok: false, error: { kind: "internal", message: "не вызывается" } }),
+    episodes: async () => ({ ok: false, error: { kind: "internal", message: "не вызывается" } }),
+    streams: async () => ({ ok: false, error: { kind: "internal", message: "не вызывается" } }),
+    playerLoad: async () => ({ ok: false, error: { kind: "internal", message: "не вызывается" } }),
     quit: async () => {},
     ...overrides,
   };
