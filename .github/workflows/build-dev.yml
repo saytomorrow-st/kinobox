@@ -87,8 +87,12 @@ jobs:
         run: cargo install tauri-cli --version "^2.0" --locked
 
       # arm64-половина universal libmpv.dylib: бутылка под архитектуру раннера.
+      # LIBRARY_PATH обязателен: `brew --prefix`/lib не входит в путь поиска `cc`,
+      # без него линковка падает с "library 'mpv' not found" (см. ci.yml).
       - name: Install mpv (arm64 bottle)
-        run: brew install mpv
+        run: |
+          HOMEBREW_NO_BUILD_FROM_SOURCE=1 brew install mpv
+          echo "LIBRARY_PATH=$(brew --prefix)/lib:${LIBRARY_PATH:-}" >> "$GITHUB_ENV"
 
       # Почему сборка разбита так, а не одним `tauri build` с вендорингом внутри:
       #   1. tauri-bundler УДАЛЯЕТ .app перед каждой сборкой
@@ -223,7 +227,9 @@ jobs:
         run: cargo install tauri-cli --version "^2.0" --locked
 
       - name: Install mpv (x86_64 bottle)
-        run: brew install mpv
+        run: |
+          HOMEBREW_NO_BUILD_FROM_SOURCE=1 brew install mpv
+          echo "LIBRARY_PATH=$(brew --prefix)/lib:${LIBRARY_PATH:-}" >> "$GITHUB_ENV"
 
       - name: Build x86_64 binary (no bundle)
         run: cargo tauri build --debug --target x86_64-apple-darwin --no-bundle
