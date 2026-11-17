@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { Api, IpcError, Outcome, PlayerProgressDto, StreamQualityDto } from "./api";
+import type { Api, IpcError, Outcome, PlayerErrorDto, PlayerProgressDto, StreamQualityDto } from "./api";
 
 // `listen` из Tauri заменяем моком: в node-окружении нет ни Tauri-рантайма, ни реального
 // канала событий. Мок отдаёт колбэк наружу, чтобы тест эмулировал `player-progress` вручную,
@@ -60,23 +60,35 @@ function failure(kind: IpcError["kind"], message: string): Outcome<never> {
   return { ok: false, error: { kind, message } };
 }
 
-type Listener = (event: { payload: PlayerProgressDto }) => void;
-
-// Настраивает мок `listen` так, чтобы можно было достать переданный колбэк и unlisten-шпион.
-function setupListen(): { unlisten: ReturnType<typeof vi.fn>; emit: (payload: PlayerProgressDto) => void } {
+// Настраивает мок `listen` так, чтобы можно было достать переданные колбэки и unlisten-шпион.
+// `listen` вызывается для двух событий (`player-progress` и `player-error`), поэтому колбэки
+// раскладываются по имени события.
+function setupListen(): {
+  unlisten: ReturnType<typeof vi.fn>;
+  emitProgress: (payload: PlayerProgressDto) => void;
+  emitError: (payload: PlayerErrorDto) => void;
+} {
   const unlisten = vi.fn();
-  let captured: Listener | null = null;
-  listenMock.mockImplementation(async (_event: string, handler: Listener) => {
-    captured = handler;
+  const captured: Record<string, (event: { payload: unknown }) => void> = {};
+  listenMock.mockImplementation(async (event: string, handler: (event: { payload: unknown }) => void) => {
+    captured[event] = handler;
     return unlisten;
   });
   return {
     unlisten,
-    emit: (payload) => {
-      if (!captured) {
-        throw new Error("listen ещё не подписан");
+    emitProgress: (payload) => {
+      const handler = captured["player-progress"];
+      if (!handler) {
+        throw new Error("player-progress ещё не подписан");
       }
-      captured({ payload });
+      handler({ payload });
+    },
+    emitError: (payload) => {
+      const handler = captured["player-error"];
+      if (!handler) {
+        throw new Error("player-error ещё не подписан");
+      }
+      handler({ payload });
     },
   };
 }
@@ -132,27 +144,39 @@ describe("init", () => {
     expect(store.getState().error).not.toBe("");
   });
 
-  it("подписывается на событие player-progress один раз", async () => {
+  it("подписывается на события player-progress и player-error по одному разу", async () => {
     const store = createPlayerStore(
       fakeApi({ playerQualities: async () => ({ ok: true, value: [hd] }) }),
     );
 
     await store.getState().init();
 
-    expect(listenMock).toHaveBeenCalledTimes(1);
-    expect(listenMock.mock.calls[0]?.[0]).toBe("player-progress");
+    const events = listenMock.mock.calls.map((call) => call[0]);
+    expect(events).toEqual(["player-progress", "player-error"]);
   });
 
   it("эмулирует прогресс-событие и обновляет position/duration/paused", async () => {
-    const { emit } = setupListen();
+    const { emitProgress } = setupListen();
     const store = createPlayerStore(
       fakeApi({ playerQualities: async () => ({ ok: true, value: [hd] }) }),
     );
     await store.getState().init();
 
-    emit({ position: 42, duration: 1800, paused: true });
+    emitProgress({ position: 42, duration: 1800, paused: true });
 
     expect(store.getState()).toMatchObject({ position: 42, duration: 1800, paused: true });
+  });
+
+  it("эмулирует player-error и выставляет сообщение в error", async () => {
+    const { emitError } = setupListen();
+    const store = createPlayerStore(
+      fakeApi({ playerQualities: async () => ({ ok: true, value: [hd] }) }),
+    );
+    await store.getState().init();
+
+    emitError({ message: "Не удалось воспроизвести поток." });
+
+    expect(store.getState().error).toBe("Не удалось воспроизвести поток.");
   });
 
   it("повторный вызов, пока первый ещё выполняется, не дублирует запросы", async () => {
@@ -170,7 +194,7 @@ describe("init", () => {
     await Promise.all([first, second]);
 
     expect(qualitiesSpy).toHaveBeenCalledTimes(1);
-    expect(listenMock).toHaveBeenCalledTimes(1);
+    expect(listenMock).toHaveBeenCalledTimes(2);
     expect(store.getState().qualities).toEqual([hd]);
   });
 
@@ -182,7 +206,7 @@ describe("init", () => {
     await store.getState().init();
 
     expect(qualitiesSpy).toHaveBeenCalledTimes(1);
-    expect(listenMock).toHaveBeenCalledTimes(1);
+    expect(listenMock).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -195,10 +219,10 @@ describe("dispose", () => {
     await store.getState().init();
 
     store.getState().dispose();
-    expect(unlisten).toHaveBeenCalledTimes(1);
+    expect(unlisten).toHaveBeenCalledTimes(2);
 
     await store.getState().init();
-    expect(listenMock).toHaveBeenCalledTimes(2);
+    expect(listenMock).toHaveBeenCalledTimes(4);
   });
 });
 
@@ -278,7 +302,7 @@ describe("close", () => {
 
     await store.getState().close();
 
-    expect(unlisten).toHaveBeenCalledTimes(1);
+    expect(unlisten).toHaveBeenCalledTimes(2);
     expect(stopSpy).toHaveBeenCalledTimes(1);
     expect(store.getState().error).toBeNull();
   });

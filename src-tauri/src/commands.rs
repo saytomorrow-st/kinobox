@@ -5,9 +5,9 @@ use std::time::Duration;
 
 use kino_ipc::{
     BootState, EpisodeDto, IpcError, MediaDetailsDto, MediaItemDto, MediaKindDto, MirrorDto,
-    PlayerProgressDto, StreamQualityDto, TranslatorId, UserDto,
+    PlayerErrorDto, PlayerProgressDto, StreamQualityDto, TranslatorId, UserDto,
 };
-use kino_player::{PlayerEvent, WindowRenderTarget, WindowedPlayer};
+use kino_player::{EndReason, PlayerEvent, WindowRenderTarget, WindowedPlayer};
 use tauri::{AppHandle, Emitter, State, Window};
 
 use crate::player_state::{player_error, PlayerState};
@@ -18,6 +18,11 @@ use crate::windows;
 fn redact_url_for_log(raw: &str) -> &str {
     raw.split(['?', '#']).next().unwrap_or(raw)
 }
+
+/// Текст асинхронной ошибки mpv для UI: по-русски, без технических деталей mpv и без
+/// утечки URL/токенов потока. Техническая причина логируется в `events.rs` у источника.
+const PLAYBACK_ERROR_MESSAGE: &str =
+    "Не удалось воспроизвести поток. Попробуйте другую озвучку или качество.";
 
 /// Окно входа создано скрытым и показывается только здесь, если вход не удался тихо.
 #[tauri::command]
@@ -389,7 +394,8 @@ fn with_player<R>(
 }
 
 /// Фоновый поток прогресса: опрашивает события mpv и эмиттит снимок в `player-controls`
-/// событием `player-progress`. Сам завершается, когда `shared` становится `None` (закрытие окна).
+/// событием `player-progress`, а асинхронную ошибку mpv — событием `player-error`.
+/// Сам завершается, когда `shared` становится `None` (закрытие окна).
 ///
 /// Мьютекс держится на время `next_event` (максимум ~0.1 с): за это время команды
 /// `player_play`/`player_pause` могут кратко заблокироваться — осознанная цена за то, что
@@ -412,6 +418,21 @@ fn start_progress_thread(app: AppHandle, shared: Arc<Mutex<Option<WindowedPlayer
             let Some(event) = event else {
                 continue;
             };
+            // Асинхронный провал mpv (после принятого `loadfile`) приходит событием
+            // `EndOfFile(Error)` или `Error(msg)`. Доносим его до UI как `player-error` —
+            // иначе потеряется на `_ => false` и пользователь увидит вечный серый экран.
+            match &event {
+                PlayerEvent::EndOfFile(EndReason::Error) | PlayerEvent::Error(_) => {
+                    let _ = app.emit_to(
+                        windows::PLAYER_CONTROLS,
+                        "player-error",
+                        PlayerErrorDto {
+                            message: PLAYBACK_ERROR_MESSAGE.to_string(),
+                        },
+                    );
+                }
+                _ => {}
+            }
             let changed = match event {
                 PlayerEvent::Position(position) => {
                     progress.position = Some(position);

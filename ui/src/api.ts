@@ -29,12 +29,17 @@ export type {
 };
 
 // `specta` не видит типы, которые используются только в сырых событиях (`emit_to`), а не в
-// сигнатурах команд — `player-progress` в bindings.ts не генерируется. Дублируем вручную,
-// зеркалируя `PlayerProgressDto` из `crates/kino-ipc/src/dto.rs` (camelCase через serde).
+// сигнатурах команд — `player-progress` и `player-error` в bindings.ts не генерируются.
+// Дублируем вручную, зеркалируя `PlayerProgressDto`/`PlayerErrorDto` из
+// `crates/kino-ipc/src/dto.rs` (camelCase через serde).
 export type PlayerProgressDto = {
   position: number | null;
   duration: number | null;
   paused: boolean;
+};
+
+export type PlayerErrorDto = {
+  message: string;
 };
 
 export type Outcome<T> = { ok: true; value: T } | { ok: false; error: IpcError };

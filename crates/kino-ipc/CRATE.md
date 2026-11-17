@@ -5,7 +5,7 @@
 
 Реэкспортировано из корня крейта: `AppService`, `BootState`, `UserDto`, `MirrorDto`, `MirrorStateDto`,
 `MediaKindDto`, `MediaItemDto`, `MediaDetailsDto`, `TranslatorDto`, `SeasonDto`, `EpisodeDto`,
-`StreamQualityDto`, `PlayerProgressDto`, `IpcError`, `IpcErrorKind`, `ClientConfig`, `MirrorConfig`,
+`StreamQualityDto`, `PlayerProgressDto`, `PlayerErrorDto`, `IpcError`, `IpcErrorKind`, `ClientConfig`, `MirrorConfig`,
 `KeychainSecretStore`, `MemorySecretStore`, `MemoryMirrorStore`.
 
 ## AppService
@@ -109,6 +109,7 @@ impl<S: SecretStore, M: MirrorStore> AppService<S, M> {
 | `EpisodeDto` | `{ seasonId, episodeId, title }` |
 | `StreamQualityDto` | `{ label, url, premium, hls: string \| null, fallbacks: string[] }`. `try_into_stream_quality` разбирает адреса обратно в `StreamQuality` и возвращает `InvalidInput` на испорченный URL — использует `src-tauri` (#021) для загрузки потока в `kino-player` |
 | `PlayerProgressDto` | `{ position: number \| null, duration: number \| null, paused: boolean }` — снимок прогресса, который `src-tauri` эмиттит в окно `player-controls` событием `player-progress` |
+| `PlayerErrorDto` | `{ message: string }` — человекочитаемое русское сообщение асинхронной ошибки mpv, которое `src-tauri` эмиттит событием `player-error` |
 | `IpcError` | `{ kind: IpcErrorKind, message: string }`, реализует `Display` и `std::error::Error` |
 | `IpcErrorKind` | `invalidInput`, `loginRejected`, `authRequired`, `challenge`, `network`, `keychain`, `noMirrors`, `internal` |
 

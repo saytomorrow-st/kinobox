@@ -411,6 +411,15 @@ pub struct PlayerProgressDto {
     pub paused: bool,
 }
 
+/// Сообщение об асинхронной ошибке mpv (после принятого `loadfile`), которое `src-tauri`
+/// эмиттит в окно `player-controls` событием `player-error`. `message` — человекочитаемый
+/// русский текст для UI (без технических деталей mpv и без утечки URL/токенов потока).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PlayerErrorDto {
+    pub message: String,
+}
+
 /// Те же зеркало: схема, хост и порт; путь и запрос не важны.
 pub(crate) fn same_mirror(a: &Url, b: &Url) -> bool {
     a.scheme() == b.scheme()
@@ -785,5 +794,17 @@ mod tests {
             serde_json::to_value(empty).unwrap(),
             json!({"position": null, "duration": null, "paused": false})
         );
+    }
+
+    #[test]
+    fn player_error_dto_is_camel_case() {
+        let error = PlayerErrorDto {
+            message: "Не удалось воспроизвести поток.".to_string(),
+        };
+        assert_eq!(
+            serde_json::to_value(&error).unwrap(),
+            json!({"message": "Не удалось воспроизвести поток."})
+        );
+        roundtrip(&error);
     }
 }
