@@ -1,7 +1,7 @@
 ---
 id: 033
 type: feature
-status: open
+status: done
 model: deepseek-v4-pro
 crate: kino-core, kino-api, kino-ipc
 created: 2026-11-18
