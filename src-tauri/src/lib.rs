@@ -60,9 +60,16 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     install_panic_hook();
 
     // Двойная запись: в stdout (Console.app при живом запуске) и в файл
-    // `~/Library/Logs/app.kinobox.desktop/` (LogDir). Уровень в debug-сборке
-    // Debug, в release — Info, чтобы не тащить шум в боевые логи.
-    let level = if cfg!(debug_assertions) {
+    // `~/Library/Logs/app.kinobox.desktop/` (LogDir). Общий уровень — Info
+    // (и в debug, и в release): сторонние крейты (`selectors`/`html5ever`/
+    // `scraper` внутри kino-api, `tao`/`wry` внутри Tauri и т.п.) на Debug
+    // заваливают лог тысячами строк вида "Matching complex selector ..." и
+    // хоронят в них собственные сообщения приложения (баг, найден
+    // 17.11.2026 по реальному `KinoBox.log` заказчика — файл был на 100%
+    // состоящим из `selectors::matching`). Debug оставлен только для своих
+    // крейтов через `level_for`, по имени пакета (`CARGO_PKG_NAME` с `-`
+    // заменённым на `_`, как его видит `log`/`fern`).
+    let own_crates_level = if cfg!(debug_assertions) {
         log::LevelFilter::Debug
     } else {
         log::LevelFilter::Info
@@ -75,7 +82,13 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                     Target::new(TargetKind::Stdout),
                     Target::new(TargetKind::LogDir { file_name: None }),
                 ])
-                .level(level)
+                .level(log::LevelFilter::Info)
+                .level_for("kino_core", own_crates_level)
+                .level_for("kino_api", own_crates_level)
+                .level_for("kino_store", own_crates_level)
+                .level_for("kino_ipc", own_crates_level)
+                .level_for("kino_player", own_crates_level)
+                .level_for("kinobox_app", own_crates_level)
                 .build(),
         )
         .setup(|app| {
