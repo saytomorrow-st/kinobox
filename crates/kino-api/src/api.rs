@@ -141,7 +141,13 @@ impl HdrezkaApi {
             "серии: id={id} translator_id={translator} favs={}",
             redact_favs(favs)
         );
-        let reply = self.client.post_form(&url, &form).await?;
+        let reply = match self.client.post_form(&url, &form).await {
+            Ok(reply) => reply,
+            Err(err) => {
+                log::warn!("серии: запрос get_cdn_series не дошёл: {err}");
+                return Err(err);
+            }
+        };
         let text = reply.text();
         let value = match parse_cdn_json(&text, "get_episodes") {
             Ok(value) => value,
@@ -155,10 +161,19 @@ impl HdrezkaApi {
             }
         };
 
-        let episodes = value
-            .get("episodes")
-            .and_then(serde_json::Value::as_object)
-            .ok_or_else(|| KinoError::Parse("get_episodes: нет поля episodes".to_string()))?;
+        let episodes = match value.get("episodes").and_then(serde_json::Value::as_object) {
+            Some(episodes) => episodes,
+            None => {
+                log::warn!(
+                    "серии: success=true, но поля episodes нет (HTTP {}): {}",
+                    reply.status,
+                    describe_parse_failure(&text)
+                );
+                return Err(KinoError::Parse(
+                    "get_episodes: нет поля episodes".to_string(),
+                ));
+            }
+        };
 
         let mut map = HashMap::new();
         for (season, html) in episodes {
