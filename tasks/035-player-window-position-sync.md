@@ -1,7 +1,7 @@
 ---
 id: 035
 type: bug
-status: open
+status: done
 model: deepseek-v4-pro
 crate: src-tauri
 created: 2026-11-18
@@ -74,4 +74,29 @@ created: 2026-11-18
 
 ## Заметки
 
-[Ведёт агент: ход работы, найденные нюансы, blockers]
+Реализовано в `src-tauri/src/windows.rs`, функция `attach_player_sync` (#035).
+
+**Схема синхронизации:** при открытии плеера (`open_player`) снимается смещение
+`player` относительно `main` в физических пикселях и кладётся в статический
+`PLAYER_SYNC_OFFSET: Mutex<Option<(i32, i32)>>`. На окно `main` один раз
+навешивается обработчик `on_window_event` (флаг `PLAYER_SYNC_ATTACHED` —
+`AtomicBool::swap`, чтобы при повторном открытии плеера не появилась вторая
+подписка; окно `main` живёт дольше `player`). На каждый `Moved`/`Resized` окна
+`main` обработчик ставит `player` в `main.position + offset`; размер `player`
+не меняется — плеер «ездит» вместе с главным, оставаясь отдельным окном.
+
+**Выключение:** при `CloseRequested`/`Destroyed` плеера offset сбрасывается в
+`None` → обработчик остаётся, но делает no-op (дополнительно проверяется
+`get_window(PLAYER)`). Ошибки применения — `log::warn!`, без паники.
+
+**Fullscreen:** если `main.is_fullscreen()` — синхронизация пропускается
+(безопасный no-op), при ошибке проверки fullscreen тоже пропуск. Геометрию
+fullscreen не ломает, за экран плеер не уводит.
+
+Логика #031 (`Focused(true)` → `set_focus()` на `player-controls`) и #027
+(`center: true`, `set_focus()` после `show()`) не тронуты — `attach_player_sync`
+вызывается поверх, после `set_focus()` плеера и до `open_player_controls`.
+
+Проверка — только CI (`src-tauri` локально не собирается, `-lmpv`). Живой
+GUI-тест: подвинь/измени размер `main` при открытом плеере — плеер должен
+визуально следовать.
