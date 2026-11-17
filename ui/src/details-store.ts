@@ -3,6 +3,7 @@ import { create } from "zustand";
 import type {
   Api,
   EpisodeDto,
+  IpcError,
   MediaDetailsDto,
   MediaItemDto,
   StreamQualityDto,
@@ -11,7 +12,27 @@ import type {
 
 const ERROR_DETAILS = "Не удалось загрузить данные. Попробуйте ещё раз.";
 const ERROR_EPISODES = "Не удалось загрузить список серий. Попробуйте ещё раз.";
-const ERROR_LAUNCH = "Не удалось запустить воспроизведение. Попробуйте ещё раз.";
+const ERROR_LAUNCH =
+  "Не удалось запустить воспроизведение. Попробуйте другую озвучку, зеркало или VPN.";
+
+// При `success:false` HDrezka возвращает конкретный текст (например про геоблок
+// региона) — kino-api доносит его как `KinoError::Parse("<action>: <текст>")`.
+// Технический префикс действия пользователю не нужен, важен сам текст сервера (#038).
+const STREAMS_ACTION_PREFIX = /^(get_movie|get_stream|get_episodes):\s*/;
+const GEOBLOCK_HINT =
+  " Похоже, контент недоступен в вашем регионе — попробуйте другое зеркало или VPN.";
+// Эвристика по ключевым словам: точный признак геоблока по одному тексту не
+// выделить, но ложное срабатывание безвредно — подсказка про зеркало/VPN уместна
+// при любой ошибке запуска.
+const GEOBLOCK_KEYWORDS = ["регион", "region", "недоступ", "unavailable in your"];
+
+function launchErrorMessage(error: IpcError): string {
+  const text = error.message.replace(STREAMS_ACTION_PREFIX, "").trim();
+  if (!text) return ERROR_LAUNCH;
+  const lowered = text.toLowerCase();
+  const looksLikeGeoblock = GEOBLOCK_KEYWORDS.some((keyword) => lowered.includes(keyword));
+  return looksLikeGeoblock ? text + GEOBLOCK_HINT : text;
+}
 
 export interface DetailsState {
   open: boolean;
@@ -112,7 +133,7 @@ export function createDetailsStore(api: Api) {
       set({ launching: true, launchError: null });
       const streamsOutcome = await api.streams(item, translatorId, episode);
       if (!streamsOutcome.ok) {
-        set({ launching: false, launchError: ERROR_LAUNCH });
+        set({ launching: false, launchError: launchErrorMessage(streamsOutcome.error) });
         return;
       }
 

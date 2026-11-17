@@ -13,7 +13,10 @@ import { createDetailsStore } from "./details-store";
 
 const ERROR_DETAILS = "Не удалось загрузить данные. Попробуйте ещё раз.";
 const ERROR_EPISODES = "Не удалось загрузить список серий. Попробуйте ещё раз.";
-const ERROR_LAUNCH = "Не удалось запустить воспроизведение. Попробуйте ещё раз.";
+const ERROR_LAUNCH =
+  "Не удалось запустить воспроизведение. Попробуйте другую озвучку, зеркало или VPN.";
+const GEOBLOCK_HINT =
+  " Похоже, контент недоступен в вашем регионе — попробуйте другое зеркало или VPN.";
 
 function item(id: number, overrides: Partial<MediaItemDto> = {}): MediaItemDto {
   return {
@@ -407,11 +410,42 @@ describe("play", () => {
     expect(store.getState().launchError).not.toBe("");
   });
 
-  it("ошибка streams даёт ошибку запуска и не закрывает карточку", async () => {
+  it("ошибка streams показывает реальный текст ошибки без технического префикса", async () => {
     const store = createDetailsStore(
       fakeApi({
         details: async () => ({ ok: true, value: filmDetails }),
-        streams: async () => failure("network", "нет сети"),
+        streams: async () => failure("internal", "get_stream: нужен премиум"),
+      }),
+    );
+    await store.getState().openFor(film);
+
+    await store.getState().play();
+
+    expect(store.getState()).toMatchObject({ launching: false, launchError: "нужен премиум", open: true });
+  });
+
+  it("текст геоблока дополняется подсказкой про зеркало/VPN", async () => {
+    const store = createDetailsStore(
+      fakeApi({
+        details: async () => ({ ok: true, value: filmDetails }),
+        streams: async () =>
+          failure("internal", "get_movie: Unfortunately this video is unavailable in your region"),
+      }),
+    );
+    await store.getState().openFor(film);
+
+    await store.getState().play();
+
+    expect(store.getState().launchError).toBe(
+      "Unfortunately this video is unavailable in your region" + GEOBLOCK_HINT,
+    );
+  });
+
+  it("пустой текст ошибки streams даёт общий запасной текст", async () => {
+    const store = createDetailsStore(
+      fakeApi({
+        details: async () => ({ ok: true, value: filmDetails }),
+        streams: async () => failure("internal", "   "),
       }),
     );
     await store.getState().openFor(film);
