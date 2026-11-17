@@ -84,9 +84,12 @@
 
 | Тип | Поля |
 |---|---|
-| `CatalogQuery` | `kind: Option<MediaKind>` (`None` — все типы), `page: u32` (с 1) |
+| `CatalogQuery` | `kind: Option<MediaKind>` (`None` — все типы), `page: u32` (с 1), `sort: Option<CatalogSort>` (`None` — дефолт сайта), `genre: Option<String>` (slug жанра, `None` — без фильтра) |
+| `CatalogSort` | `Last`, `Popular`, `Soon`, `Watching` (serde `snake_case`; `as_query_value()` — значение `filter=`) |
 
-Тип: `Debug, Clone, PartialEq, Serialize, Deserialize`.
+Тип: `Debug, Clone, PartialEq, Serialize, Deserialize`. `CatalogSort` — `Copy, Eq, Hash`.
+`CatalogSort::as_query_value()` возвращает строку для query-параметра `filter=` HDrezka
+(`last`/`popular`/`soon`/`watching`), совпадает с serde `snake_case`-представлением.
 
 ```rust
 pub trait KinoProvider: Send + Sync {

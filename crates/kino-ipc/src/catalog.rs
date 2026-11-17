@@ -4,21 +4,28 @@
 use kino_api::{MirrorStore, SecretStore};
 use kino_core::{CatalogQuery, Episode, KinoProvider};
 
-use crate::dto::{EpisodeDto, MediaDetailsDto, MediaItemDto, MediaKindDto, StreamQualityDto};
+use crate::dto::{
+    CatalogSortDto, EpisodeDto, MediaDetailsDto, MediaItemDto, MediaKindDto, StreamQualityDto,
+};
 use crate::error::IpcError;
 use crate::service::AppService;
 
 impl<S: SecretStore, M: MirrorStore> AppService<S, M> {
-    /// Страница каталога; `page` нумеруется с 1. `kind` — `None` для всех типов.
+    /// Страница каталога; `page` нумеруется с 1. `kind` — `None` для всех типов,
+    /// `genre` — slug жанра (`None` — без фильтра), `sort` — `None` для дефолта сайта.
     pub async fn catalog(
         &self,
         kind: Option<MediaKindDto>,
         page: u32,
+        sort: Option<CatalogSortDto>,
+        genre: Option<String>,
     ) -> Result<Vec<MediaItemDto>, IpcError> {
         let provider = self.provider().await?;
         let query = CatalogQuery {
             kind: kind.map(Into::into),
             page,
+            sort: sort.map(Into::into),
+            genre,
         };
         let items = provider.catalog(query).await?;
         log::debug!("catalog: {} карточек", items.len());

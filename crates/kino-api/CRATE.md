@@ -332,11 +332,17 @@ cargo run -p kino-api --example login -- [--mirror URL] [--email EMAIL] [--logou
 pub fn parse_cards(html: &str, base: &Url) -> Result<Vec<MediaItem>>;
 pub fn parse_details(html: &str, page_url: &Url) -> Result<MediaDetails>;
 pub fn parse_last_page(html: &str) -> Option<u32>;
-pub fn catalog_url(base: &Url, kind: Option<MediaKind>, page: u32) -> Result<Url>;
+pub fn catalog_url(base: &Url, kind: Option<MediaKind>, genre: Option<&str>, page: u32, sort: Option<CatalogSort>) -> Result<Url>;
 pub fn search_url(base: &Url, query: &str, page: u32) -> Result<Url>;
 pub fn sanitize_page(html: &str) -> String;
 pub fn contains_email(html: &str) -> bool;
 ```
+
+`catalog_url` строит `{base}/{kind_section}/{genre_slug}/{page/N/}{?filter=}`:
+`genre` — slug жанра как path-сегмент (percent-кодируется, пусто при `None`),
+`page/N/` только при `page > 1`, а `?filter=<value>` добавляется только если
+`sort` задан и отличается от дефолта сайта (`last`). Без жанра, без сортировки
+и с `page == 1` адрес остаётся прежним (`{base}/films/`).
 
 `HdrezkaApi` — обёртка над `HttpClient` и корнем зеркала (inherent-методы, не трейт):
 

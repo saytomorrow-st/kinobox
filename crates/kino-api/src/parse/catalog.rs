@@ -6,7 +6,7 @@
 //! (на главной подтверждён только контейнер карточки с атрибутами `data-id`
 //! и `data-url`).
 
-use kino_core::{KinoError, MediaItem, MediaKind, Result};
+use kino_core::{CatalogSort, KinoError, MediaItem, MediaKind, Result};
 use scraper::{Html, Selector};
 use url::Url;
 
@@ -34,11 +34,29 @@ fn section(kind: MediaKind) -> &'static str {
 
 /// URL страницы каталога. Без `kind` — главная; `page` нумеруется с 1,
 /// при `page == 1` номер в путь не добавляется.
-pub fn catalog_url(base: &Url, kind: Option<MediaKind>, page: u32) -> Result<Url> {
+///
+/// Полная схема: `{base}/{kind_section}/{genre_slug}/{page/N/}{?filter=}`.
+/// `genre` — slug жанра (пустой сегмент, если не задан); `sort` добавляется
+/// как `?filter=<value>`, только если задан и отличается от дефолта сайта
+/// (`last`).
+pub fn catalog_url(
+    base: &Url,
+    kind: Option<MediaKind>,
+    genre: Option<&str>,
+    page: u32,
+    sort: Option<CatalogSort>,
+) -> Result<Url> {
     let mut path = String::from("/");
     if let Some(kind) = kind {
         path.push_str(section(kind));
         path.push('/');
+    }
+    if let Some(genre) = genre {
+        let escaped = percent_encode_path_segment(genre);
+        if !escaped.is_empty() {
+            path.push_str(&escaped);
+            path.push('/');
+        }
     }
     if page > 1 {
         path.push_str("page/");
@@ -49,7 +67,19 @@ pub fn catalog_url(base: &Url, kind: Option<MediaKind>, page: u32) -> Result<Url
     url.set_path(&path);
     url.set_query(None);
     url.set_fragment(None);
+    if let Some(sort) = sort {
+        if sort != CatalogSort::Last {
+            url.query_pairs_mut()
+                .append_pair("filter", sort.as_query_value());
+        }
+    }
     Ok(url)
+}
+
+/// Кодирует строку как один сегмент пути (жанровый slug — единый сегмент,
+/// небезопасные символы percent-кодируются).
+fn percent_encode_path_segment(segment: &str) -> String {
+    url::form_urlencoded::byte_serialize(segment.as_bytes()).collect::<String>()
 }
 
 /// Разбирает карточки со страницы каталога или поиска. Относительные ссылки
@@ -263,24 +293,135 @@ mod tests {
     #[test]
     fn catalog_url_paths() {
         let cases = [
-            (None, 1, "https://kvk.pub/"),
-            (None, 2, "https://kvk.pub/page/2/"),
-            (Some(MediaKind::Movie), 1, "https://kvk.pub/films/"),
-            (Some(MediaKind::Movie), 3, "https://kvk.pub/films/page/3/"),
-            (Some(MediaKind::Series), 1, "https://kvk.pub/series/"),
+            (None, None, 1, None, "https://kvk.pub/"),
+            (None, None, 2, None, "https://kvk.pub/page/2/"),
+            (
+                Some(MediaKind::Movie),
+                None,
+                1,
+                None,
+                "https://kvk.pub/films/",
+            ),
+            (
+                Some(MediaKind::Movie),
+                None,
+                3,
+                None,
+                "https://kvk.pub/films/page/3/",
+            ),
+            (
+                Some(MediaKind::Series),
+                None,
+                1,
+                None,
+                "https://kvk.pub/series/",
+            ),
             (
                 Some(MediaKind::Cartoon),
+                None,
                 2,
+                None,
                 "https://kvk.pub/cartoons/page/2/",
             ),
             (
                 Some(MediaKind::Anime),
+                None,
                 4,
+                None,
                 "https://kvk.pub/animation/page/4/",
             ),
         ];
-        for (kind, page, expected) in cases {
-            assert_eq!(catalog_url(&base(), kind, page).unwrap().as_str(), expected);
+        for (kind, genre, page, sort, expected) in cases {
+            assert_eq!(
+                catalog_url(&base(), kind, genre, page, sort)
+                    .unwrap()
+                    .as_str(),
+                expected
+            );
         }
+    }
+
+    #[test]
+    fn catalog_url_with_genre_sort_and_page() {
+        // Жанр + сортировка + страница 1.
+        assert_eq!(
+            catalog_url(
+                &base(),
+                Some(MediaKind::Movie),
+                Some("action"),
+                1,
+                Some(CatalogSort::Popular),
+            )
+            .unwrap()
+            .as_str(),
+            "https://kvk.pub/films/action/?filter=popular"
+        );
+        // Без жанра + сортировка + страница 2.
+        assert_eq!(
+            catalog_url(
+                &base(),
+                Some(MediaKind::Movie),
+                None,
+                2,
+                Some(CatalogSort::Popular),
+            )
+            .unwrap()
+            .as_str(),
+            "https://kvk.pub/films/page/2/?filter=popular"
+        );
+        // Дефолтная сортировка (`last`) в URL не попадает.
+        assert_eq!(
+            catalog_url(
+                &base(),
+                Some(MediaKind::Movie),
+                Some("action"),
+                1,
+                Some(CatalogSort::Last),
+            )
+            .unwrap()
+            .as_str(),
+            "https://kvk.pub/films/action/"
+        );
+        // Остальные значения сортировки.
+        assert_eq!(
+            catalog_url(
+                &base(),
+                Some(MediaKind::Movie),
+                None,
+                1,
+                Some(CatalogSort::Soon),
+            )
+            .unwrap()
+            .as_str(),
+            "https://kvk.pub/films/?filter=soon"
+        );
+        assert_eq!(
+            catalog_url(
+                &base(),
+                Some(MediaKind::Movie),
+                None,
+                1,
+                Some(CatalogSort::Watching),
+            )
+            .unwrap()
+            .as_str(),
+            "https://kvk.pub/films/?filter=watching"
+        );
+    }
+
+    #[test]
+    fn catalog_url_percent_encodes_genre_slug() {
+        assert_eq!(
+            catalog_url(
+                &base(),
+                Some(MediaKind::Movie),
+                Some("приключения и боевик"),
+                1,
+                None,
+            )
+            .unwrap()
+            .as_str(),
+            "https://kvk.pub/films/%D0%BF%D1%80%D0%B8%D0%BA%D0%BB%D1%8E%D1%87%D0%B5%D0%BD%D0%B8%D1%8F+%D0%B8+%D0%B1%D0%BE%D0%B5%D0%B2%D0%B8%D0%BA/"
+        );
     }
 }

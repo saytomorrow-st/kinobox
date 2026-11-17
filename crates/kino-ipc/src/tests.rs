@@ -11,8 +11,8 @@ use wiremock::matchers::{body_string, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use crate::{
-    AppService, BootState, EpisodeDto, IpcError, IpcErrorKind, MediaDetailsDto, MediaItemDto,
-    MediaKindDto, MirrorDto, MirrorStateDto, StreamQualityDto, UserDto,
+    AppService, BootState, CatalogSortDto, EpisodeDto, IpcError, IpcErrorKind, MediaDetailsDto,
+    MediaItemDto, MediaKindDto, MirrorDto, MirrorStateDto, StreamQualityDto, UserDto,
 };
 
 const PASSWORD: &str = "Zq9!pw-secret";
@@ -598,7 +598,7 @@ async fn catalog_delegates_to_provider_on_active_mirror() {
     service.pool.store().set_active(base(&server)).await;
 
     let items = service
-        .catalog(Some(MediaKindDto::Movie), 2)
+        .catalog(Some(MediaKindDto::Movie), 2, None, None)
         .await
         .expect("каталог");
 
@@ -616,13 +616,42 @@ async fn catalog_delegates_to_provider_on_active_mirror() {
 }
 
 #[tokio::test]
+async fn catalog_delegates_genre_and_sort_to_provider() {
+    let server =
+        answering(ResponseTemplate::new(200).set_body_string(card(9, "/films/9.html"))).await;
+    let service = service(&[&server]).await;
+    service.pool.store().set_active(base(&server)).await;
+
+    let items = service
+        .catalog(
+            Some(MediaKindDto::Movie),
+            1,
+            Some(CatalogSortDto::Popular),
+            Some("action".to_string()),
+        )
+        .await
+        .expect("каталог");
+
+    assert_eq!(items.len(), 1);
+    let requested = server
+        .received_requests()
+        .await
+        .expect("запросы")
+        .into_iter()
+        .next()
+        .expect("хотя бы один запрос");
+    assert_eq!(requested.url.path(), "/films/action/");
+    assert_eq!(requested.url.query(), Some("filter=popular"));
+}
+
+#[tokio::test]
 async fn catalog_without_active_mirror_resolves_one() {
     let server =
         answering(ResponseTemplate::new(200).set_body_string(card(9, "/films/9.html"))).await;
     let service = service(&[&server]).await;
     assert_eq!(service.pool.store().active().await, None);
 
-    let items = service.catalog(None, 1).await.expect("каталог");
+    let items = service.catalog(None, 1, None, None).await.expect("каталог");
 
     assert_eq!(items.len(), 1);
     assert_eq!(service.pool.store().active().await, Some(base(&server)));
@@ -633,7 +662,10 @@ async fn catalog_reports_no_mirrors() {
     let broken = dead().await;
     let service = service(&[&broken]).await;
 
-    let err = service.catalog(None, 1).await.expect_err("ожидали ошибку");
+    let err = service
+        .catalog(None, 1, None, None)
+        .await
+        .expect_err("ожидали ошибку");
 
     assert_eq!(err.kind, IpcErrorKind::NoMirrors);
 }

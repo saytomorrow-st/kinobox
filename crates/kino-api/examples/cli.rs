@@ -274,7 +274,15 @@ async fn main() -> ExitCode {
             }
         },
         Command::Catalog { kind, page, .. } => {
-            match api.catalog(CatalogQuery { kind, page }).await {
+            match api
+                .catalog(CatalogQuery {
+                    kind,
+                    page,
+                    sort: None,
+                    genre: None,
+                })
+                .await
+            {
                 Ok(items) => {
                     print_items(&items);
                     ExitCode::SUCCESS

@@ -4,7 +4,8 @@ use std::time::Duration;
 
 use kino_api::{MirrorState, MirrorStatus, ResolvedMirror};
 use kino_core::{
-    Episode, MediaDetails, MediaItem, MediaKind, Season, StreamQuality, Translator, UserSession,
+    CatalogSort, Episode, MediaDetails, MediaItem, MediaKind, Season, StreamQuality, Translator,
+    UserSession,
 };
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -152,6 +153,38 @@ impl From<MediaKindDto> for MediaKind {
             MediaKindDto::Series => Self::Series,
             MediaKindDto::Cartoon => Self::Cartoon,
             MediaKindDto::Anime => Self::Anime,
+        }
+    }
+}
+
+/// Сортировка/фильтр каталога (соответствует `filter=` HDrezka).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum CatalogSortDto {
+    Last,
+    Popular,
+    Soon,
+    Watching,
+}
+
+impl From<CatalogSort> for CatalogSortDto {
+    fn from(sort: CatalogSort) -> Self {
+        match sort {
+            CatalogSort::Last => Self::Last,
+            CatalogSort::Popular => Self::Popular,
+            CatalogSort::Soon => Self::Soon,
+            CatalogSort::Watching => Self::Watching,
+        }
+    }
+}
+
+impl From<CatalogSortDto> for CatalogSort {
+    fn from(sort: CatalogSortDto) -> Self {
+        match sort {
+            CatalogSortDto::Last => Self::Last,
+            CatalogSortDto::Popular => Self::Popular,
+            CatalogSortDto::Soon => Self::Soon,
+            CatalogSortDto::Watching => Self::Watching,
         }
     }
 }
