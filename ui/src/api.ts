@@ -118,7 +118,8 @@ export const tauriApi: Api = {
   checkMirrors: () => call(() => commands.checkMirrors()),
   addMirror: (url) => call(() => commands.addMirror(url)),
   selectMirror: (url) => call(() => commands.selectMirror(url)),
-  catalog: (kind, page) => call(() => commands.catalog(kind, page)),
+  // sort/genre пока не используются UI (#033 — только бэкенд-фундамент под #038/#039).
+  catalog: (kind, page) => call(() => commands.catalog(kind, page, null, null)),
   search: (query) => call(() => commands.search(query)),
   details: (item) => call(() => commands.details(item)),
   episodes: (details) => call(() => commands.episodes(details)),
