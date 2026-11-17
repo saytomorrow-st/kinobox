@@ -27,6 +27,9 @@ impl<S: SecretStore, M: MirrorStore> AppService<S, M> {
             }
             Err(err) => return unavailable(&err),
         };
+        // Граница между Keychain и сетью: если `boot` зависает, этот лог показывает,
+        // прошло ли чтение Keychain (симптом «логина нет», см. #032).
+        log::info!("boot: данные из Keychain загружены — разрешаю зеркало");
         let mirror = match self.pool.resolve().await {
             Ok(mirror) => mirror.url,
             Err(err) => return unavailable(&err),
