@@ -1,7 +1,7 @@
 ---
 id: 032
 type: bug
-status: review
+status: done
 model: deepseek-v4-pro
 crate: kino-ipc, src-tauri
 created: 2026-11-17

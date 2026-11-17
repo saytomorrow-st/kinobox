@@ -1,7 +1,7 @@
 ---
 id: 030
 type: bug
-status: review
+status: done
 model: deepseek-v4-pro
 crate: kino-api, kino-ipc
 created: 2026-11-17
