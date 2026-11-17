@@ -1,9 +1,9 @@
 ---
 id: 030
 type: bug
-status: open
+status: review
 model: deepseek-v4-pro
-crate: kino-api, kino-core
+crate: kino-api, kino-ipc
 created: 2026-11-17
 ---
 
@@ -112,3 +112,40 @@ HDrezka либо отклоняет/иначе отвечает на `get_episod
 никогда не тестировался на реальном HTML-ответе HDrezka (только на синтетике)
 — если фикс с `favs` не решит баг, следующий шаг — получить реальный образец
 ответа `get_episodes` и сверить разметку.
+
+## Выполнение (subagent deepseek-v4-pro, 17.11.2026)
+
+Сделан фикс. Выбран «дешёвый» вариант из ТЗ: `favs` не добавлялся в публичный
+`MediaDetails`, а извлекается по требованию из `MediaDetails::raw_html` (уже
+есть на структуре, `#[serde(skip)]`) в момент вызова — публичный API `kino-core`
+НЕ менялся; изменились только inherent-сигнатуры `HdrezkaApi::episodes_list`
+и `stream_url` (добавлен `favs: &str`).
+
+Что сделано:
+
+- `parse::extract_favs(html) -> Option<String>` — чистый парсер
+  `input#ctrl_favs` → `value`; `None`, если инпута нет (пустая строка в форме).
+- `episodes_list` и `stream_url` принимают `favs` и добавляют поле в форму
+  POST `/ajax/get_cdn_series/` (для ЛЮБОГО action, как в эталонных либах —
+  сверено с `kristal374/hdrezka-api` `construct_types.py`/`base_movie.py`).
+- `provider_impl::episodes`/`streams` достают `favs` из `raw_html` и пробрасывают.
+- Тесты: `extract_favs` (есть/нет/пустой инпут); моки форм в `api.rs` обновлены;
+  интеграционный тест `kino-ipc::streams_for_series_episode_delegates_to_provider`
+  обновлён (фикстура `series_details_html` получила `input#ctrl_favs`, матчер
+  тела — поле `favs`).
+- `CRATE.md` (kino-api): обновлены сигнатуры и описание AJAX-формы. `kino-core`
+  не менялся.
+
+Нюансы:
+
+- `favs` в лог пишется только как `(есть)`/`(пусто)` через `redact_favs` —
+  сам UUID-подобный токен не логируется.
+- Фикс **эмпирически не подтверждён** без живого запроса к HDrezka (внешний
+  сервис, CI его не дёргает). Живая проверка списка серий — только у заказчика
+  после сборки.
+- CI зелёный: `cargo test --workspace` (включая `kino-api` + `kino-ipc`),
+  clippy, fmt, cross-check, bindings, ui — все 3 job'а `pass`.
+
+PR: https://github.com/saytomorrow-st/kinobox/pull/34
+Финальный статус CI: все job'ы зелёные (rust/bindings/ui — success).
+Лид-агент делает финальное ревью перед мержем.
