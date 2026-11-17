@@ -566,6 +566,7 @@ fn card(id: u64, data_url: &str) -> String {
 fn series_details_html(id: u64) -> String {
     format!(
         r#"<input id="post_id" value="{id}">
+        <input id="ctrl_favs" value="favs-token-123">
         <div class="b-post__title"><h1>Сериал {id}</h1></div>
         <ul id="translators-list"><li data-translator_id="111">Дублированный</li></ul>
         <ul><li class="b-simple_season__item" data-tab_id="1">1 сезон</li></ul>
@@ -772,7 +773,7 @@ async fn streams_for_series_episode_delegates_to_provider() {
     Mock::given(method("POST"))
         .and(path("/ajax/get_cdn_series/"))
         .and(body_string(
-            "id=7&translator_id=111&action=get_stream&season=1&episode=2",
+            "id=7&translator_id=111&favs=favs-token-123&action=get_stream&season=1&episode=2",
         ))
         .respond_with(ResponseTemplate::new(200).set_body_string(body))
         .mount(&series_page)
