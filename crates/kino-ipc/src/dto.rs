@@ -4,8 +4,8 @@ use std::time::Duration;
 
 use kino_api::{MirrorState, MirrorStatus, ResolvedMirror};
 use kino_core::{
-    CatalogSort, Episode, MediaDetails, MediaItem, MediaKind, Season, StreamQuality, Translator,
-    UserSession,
+    CatalogSort, Collection, Episode, MediaDetails, MediaItem, MediaKind, Season, StreamQuality,
+    Translator, UserSession,
 };
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -241,6 +241,53 @@ impl MediaItemDto {
             poster_url,
             page_url,
             rating: self.rating,
+        })
+    }
+}
+
+/// Курируемая коллекция HDrezka (не тип произведения, не жанр — отдельная сущность).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct CollectionDto {
+    #[specta(type = Number)]
+    pub id: u64,
+    pub title: String,
+    pub url: String,
+    pub poster_url: Option<String>,
+    pub items_count: Option<u32>,
+}
+
+impl From<&Collection> for CollectionDto {
+    fn from(collection: &Collection) -> Self {
+        Self {
+            id: collection.id,
+            title: collection.title.clone(),
+            url: collection.url.to_string(),
+            poster_url: collection.poster_url.as_ref().map(ToString::to_string),
+            items_count: collection.items_count,
+        }
+    }
+}
+
+impl CollectionDto {
+    /// Обратно в `Collection`: `kino-ipc` получает только то, что сам отдал, поэтому
+    /// `url`/`poster_url` считаются корректными адресами.
+    pub(crate) fn try_into_collection(&self) -> Result<Collection, IpcError> {
+        let url = Url::parse(&self.url)
+            .map_err(|_| IpcError::invalid_input("Некорректный адрес коллекции"))?;
+        let poster_url = match &self.poster_url {
+            Some(raw) => Some(
+                Url::parse(raw)
+                    .map_err(|_| IpcError::invalid_input("Некорректный адрес обложки коллекции"))?,
+            ),
+            None => None,
+        };
+        Ok(Collection {
+            id: self.id,
+            title: self.title.clone(),
+            url,
+            poster_url,
+            items_count: self.items_count,
         })
     }
 }
@@ -802,6 +849,55 @@ mod tests {
         });
         dto.fallbacks = vec!["не url".to_string()];
         let err = dto.try_into_stream_quality().unwrap_err();
+        assert_eq!(err.kind, IpcErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn collection_dto_is_camel_case_and_round_trips_both_ways() {
+        let collection = Collection {
+            id: 5,
+            title: "Оскар 2026".to_string(),
+            url: Url::parse("https://kvk.pub/collections/5-oskar-2026/").unwrap(),
+            poster_url: Some(Url::parse("https://kvk.pub/collections/5.jpg").unwrap()),
+            items_count: Some(24),
+        };
+        let dto = CollectionDto::from(&collection);
+        assert_eq!(
+            serde_json::to_value(&dto).unwrap(),
+            json!({
+                "id": 5,
+                "title": "Оскар 2026",
+                "url": "https://kvk.pub/collections/5-oskar-2026/",
+                "posterUrl": "https://kvk.pub/collections/5.jpg",
+                "itemsCount": 24,
+            })
+        );
+        roundtrip(&dto);
+        assert_eq!(dto.try_into_collection().unwrap(), collection);
+    }
+
+    #[test]
+    fn collection_dto_rejects_bad_urls_on_the_way_back() {
+        let mut dto = CollectionDto::from(&Collection {
+            id: 5,
+            title: "Оскар 2026".to_string(),
+            url: Url::parse("https://kvk.pub/collections/5-oskar-2026/").unwrap(),
+            poster_url: None,
+            items_count: None,
+        });
+        dto.url = "не url".to_string();
+        let err = dto.try_into_collection().unwrap_err();
+        assert_eq!(err.kind, IpcErrorKind::InvalidInput);
+
+        let mut dto = CollectionDto::from(&Collection {
+            id: 5,
+            title: "Оскар 2026".to_string(),
+            url: Url::parse("https://kvk.pub/collections/5-oskar-2026/").unwrap(),
+            poster_url: None,
+            items_count: None,
+        });
+        dto.poster_url = Some("не url".to_string());
+        let err = dto.try_into_collection().unwrap_err();
         assert_eq!(err.kind, IpcErrorKind::InvalidInput);
     }
 

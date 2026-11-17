@@ -5,7 +5,7 @@ use std::future::Future;
 use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
-use crate::media::{Episode, MediaDetails, MediaItem, MediaKind};
+use crate::media::{Collection, Episode, MediaDetails, MediaItem, MediaKind};
 use crate::stream::StreamQuality;
 
 /// Сортировка/фильтр каталога (соответствует `filter=` HDrezka).
@@ -79,6 +79,17 @@ pub trait KinoProvider: Send + Sync {
         translator_id: Option<u64>,
         episode: Option<&Episode>,
     ) -> impl Future<Output = Result<Vec<StreamQuality>>> + Send;
+
+    /// Список курируемых коллекций с главной страницы. Может вернуть `Parse`.
+    fn collections(&self) -> impl Future<Output = Result<Vec<Collection>>> + Send;
+
+    /// Постеры конкретной коллекции, с пагинацией (`page` нумеруется с 1).
+    /// Может вернуть `Parse`.
+    fn collection_items(
+        &self,
+        collection: &Collection,
+        page: u32,
+    ) -> impl Future<Output = Result<Vec<MediaItem>>> + Send;
 }
 
 #[cfg(test)]
@@ -117,6 +128,7 @@ mod tests {
         details: MediaDetails,
         episodes: Vec<Episode>,
         qualities: Vec<StreamQuality>,
+        collections: Vec<Collection>,
     }
 
     impl MockProvider {
@@ -158,6 +170,13 @@ mod tests {
                     premium: false,
                     hls: None,
                     fallbacks: vec![],
+                }],
+                collections: vec![Collection {
+                    id: 5,
+                    title: "Оскар 2026".to_string(),
+                    url: Url::parse("https://kvk.pub/collections/5-oskar-2026/").unwrap(),
+                    poster_url: Some(Url::parse("https://kvk.pub/collections/5.jpg").unwrap()),
+                    items_count: Some(24),
                 }],
             }
         }
@@ -216,6 +235,25 @@ mod tests {
                 }
             }
             Ok(self.qualities.clone())
+        }
+
+        async fn collections(&self) -> Result<Vec<Collection>> {
+            Ok(self.collections.clone())
+        }
+
+        async fn collection_items(
+            &self,
+            collection: &Collection,
+            page: u32,
+        ) -> Result<Vec<MediaItem>> {
+            if page == 0 {
+                return Err(KinoError::NotFound);
+            }
+            if collection.id == self.collections[0].id {
+                Ok(self.items.clone())
+            } else {
+                Err(KinoError::NotFound)
+            }
         }
     }
 
@@ -303,16 +341,41 @@ mod tests {
             pollster::block_on(provider.streams(&provider.details, Some(999), None)),
             Err(KinoError::Parse("перевод не найден".to_string()))
         );
+
+        assert_eq!(
+            pollster::block_on(provider.collections()).unwrap(),
+            provider.collections
+        );
+        let collection = provider.collections[0].clone();
+        assert_eq!(
+            pollster::block_on(provider.collection_items(&collection, 1)).unwrap(),
+            provider.items
+        );
+        assert_eq!(
+            pollster::block_on(provider.collection_items(&collection, 0)),
+            Err(KinoError::NotFound)
+        );
+        let missing = Collection {
+            id: 999,
+            ..collection
+        };
+        assert_eq!(
+            pollster::block_on(provider.collection_items(&missing, 1)),
+            Err(KinoError::NotFound)
+        );
     }
 
     #[test]
     fn provider_futures_are_send() {
         let provider = MockProvider::new();
         let episode = provider.episodes[0].clone();
+        let collection = provider.collections[0].clone();
         assert_send(&provider.search("x"));
         assert_send(&provider.episodes(&provider.details));
         assert_send(&provider.streams(&provider.details, None, None));
         assert_send(&provider.streams(&provider.details, None, Some(&episode)));
+        assert_send(&provider.collections());
+        assert_send(&provider.collection_items(&collection, 1));
     }
 
     #[test]

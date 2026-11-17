@@ -325,8 +325,8 @@ cargo run -p kino-api --example login -- [--mirror URL] [--email EMAIL] [--logou
 функций без сети; сеть — только в `HdrezkaApi`.
 
 Реэкспортировано из корня крейта: `HdrezkaApi`, `parse_cards`, `parse_details`,
-`parse_last_page`, `catalog_url`, `search_url`, `sanitize_page`, `contains_email`,
-`extract_player_data`, `parse_episodes_html`, `PlayerData`.
+`parse_last_page`, `catalog_url`, `search_url`, `parse_collections`, `collection_url`,
+`sanitize_page`, `contains_email`, `extract_player_data`, `parse_episodes_html`, `PlayerData`.
 
 ```rust
 pub fn parse_cards(html: &str, base: &Url) -> Result<Vec<MediaItem>>;
@@ -334,6 +334,8 @@ pub fn parse_details(html: &str, page_url: &Url) -> Result<MediaDetails>;
 pub fn parse_last_page(html: &str) -> Option<u32>;
 pub fn catalog_url(base: &Url, kind: Option<MediaKind>, genre: Option<&str>, page: u32, sort: Option<CatalogSort>) -> Result<Url>;
 pub fn search_url(base: &Url, query: &str, page: u32) -> Result<Url>;
+pub fn parse_collections(html: &str, base: &Url) -> Result<Vec<Collection>>;
+pub fn collection_url(collection: &Collection, page: u32) -> Result<Url>;
 pub fn sanitize_page(html: &str) -> String;
 pub fn contains_email(html: &str) -> bool;
 ```
@@ -343,6 +345,11 @@ pub fn contains_email(html: &str) -> bool;
 `page/N/` только при `page > 1`, а `?filter=<value>` добавляется только если
 `sort` задан и отличается от дефолта сайта (`last`). Без жанра, без сортировки
 и с `page == 1` адрес остаётся прежним (`{base}/films/`).
+
+`parse_collections` парсит блок `div.b-collections__newest` главной страницы и
+возвращает курируемые коллекции (`kino_core::Collection`). `collection_url`
+строит `{collection.url}/page/N/` при `N > 1`, без суффикса при `page == 1`
+(от полного URL коллекции со slug, не реконструирует по ID).
 
 `HdrezkaApi` — обёртка над `HttpClient` и корнем зеркала (inherent-методы, не трейт):
 
@@ -355,6 +362,9 @@ impl HdrezkaApi {
     pub async fn catalog(&self, query: CatalogQuery) -> Result<Vec<MediaItem>>;
     pub async fn details(&self, item: &MediaItem) -> Result<MediaDetails>;
     pub async fn details_at(&self, page_url: &Url) -> Result<MediaDetails>; // детали по адресу
+    pub async fn collections(&self) -> Result<Vec<Collection>>;            // с главной страницы
+    pub async fn collection_items(&self, collection: &Collection, page: u32)
+        -> Result<Vec<MediaItem>>;                                         // постеры коллекции, page с 1
     pub async fn episodes_list(&self, item: &MediaItem, translator_id: u32, favs: &str)
         -> Result<HashMap<u32, Vec<Episode>>>;   // action=get_episodes
     pub async fn stream_url(&self, post_id: u32, translator_id: u32, favs: &str,
@@ -393,6 +403,15 @@ impl HdrezkaApi {
 `li.b-simple_episode__item[data-season_id][data-episode_id]`) — предположение по
 исходникам, проверяется только синтетическим фрагментом.
 
+Коллекции (`parse_collections`) тоже НЕ проверены на реальной странице: блок
+`div.b-collections__newest` и карточки `.b-content__collections_item` (классы
+`-link a`, `-cover img`, `-count`) — предположение по эталонной библиотеке
+`kristal374/hdrezka-api` (`HDrezka/movie_collections.py`). Проверяется только
+синтетическим фрагментом. Механика URL подтверждена: `{base}/collections/<id>-<slug>/`
+с пагинацией `page/N/`, а карточки внутри коллекции рендерятся в том же
+контейнере `div.b-content__inline_item`, что и каталог (поэтому постеры коллекции
+парсит переиспользуемый `parse_cards`).
+
 ### Как получить реальные фикстуры
 
 ```
@@ -411,8 +430,9 @@ cargo run -p kino-api --example capture -- --out <каталог>
 ### `KinoProvider`
 
 Трейт `kino_core::KinoProvider` реализован в `src/provider_impl.rs` для
-`HdrezkaApi` (#013). `search`/`catalog`/`details` делегируют одноимённым
-inherent-методам, `episodes` и `streams` — данным плеера и AJAX (см. ниже).
+`HdrezkaApi` (#013). `search`/`catalog`/`details`/`collections`/`collection_items`
+делегируют одноимённым inherent-методам, `episodes` и `streams` — данным плеера
+и AJAX (см. ниже).
 
 ### CDN и потоки (`cdn`, `api`, `provider_impl`)
 
@@ -580,13 +600,15 @@ cargo test -p kino-api
 Для `parse`: `details` по реальной фикстуре фильма (`id=85038`, 8 переводов, год,
 страны, жанры, длительность), `parse_cards` на синтетических фрагментах (полная
 карточка, без рейтинга/постера, год-диапазон, относительные ссылки, kind по пути,
-мусор без `data-id`, пустая страница, страница входа), сезоны/серии на синтетике,
-формирование URL поиска (кириллица, percent-encoding, `page=1` без `&page`) и
-каталога (каждый `MediaKind`, `page>1`). Для `api` (wiremock): `search`/`catalog`/
-`details` шлют верный путь, пустой запрос без сети, 404 → `NotFound`, страница
-входа → `AuthRequired`. Для `sanitize`: каждое перечисленное поле заменяется,
-структура HTML сохраняется, `contains_email` отличает реальную почту от
-заглушки `user@example.com`.
+мусор без `data-id`, пустая страница, страница входа), `parse_collections` на
+синтетическом фрагменте (полная карточка, без обложки/счётчика, без блока/карточек,
+страница входа), `collection_url` (суффикс `page/N/` только при `N > 1`), сезоны/серии
+на синтетике, формирование URL поиска (кириллица, percent-encoding, `page=1` без
+`&page`) и каталога (каждый `MediaKind`, `page>1`). Для `api` (wiremock):
+`search`/`catalog`/`details`/`collections`/`collection_items` шлют верный путь,
+пустой запрос без сети, 404 → `NotFound`, страница входа → `AuthRequired`.
+Для `sanitize`: каждое перечисленное поле заменяется, структура HTML сохраняется,
+`contains_email` отличает реальную почту от заглушки `user@example.com`.
 
 ## Примеры
 
@@ -625,9 +647,11 @@ kvk.pub, 2026-11-14): парсер деталей фильма (`parse_details`)
 
 **НЕ проверено на реальных страницах:** парсинг каталога и поиска (селекторы
 `div.b-content__inline_item` и вложенные — из исходников двух MIT-библиотек),
-разметка `initCDNSeriesEvents` на странице сериала, сезоны/серии
-(`li.b-simple_season__item`, `li.b-simple_episode__item`), пути разделов
-`series`/`animation`. Всё это покрыто только синтетическими тестами.
+парсинг коллекций (`div.b-collections__newest`, `.b-content__collections_item` —
+по эталонной библиотеке `kristal374/hdrezka-api`), разметка `initCDNSeriesEvents`
+на странице сериала, сезоны/серии (`li.b-simple_season__item`,
+`li.b-simple_episode__item`), пути разделов `series`/`animation`. Всё это покрыто
+только синтетическими тестами.
 
 ## Сборка
 

@@ -7,10 +7,12 @@
 //! просмотр главной kvk.pub 2026-11-14).
 
 mod catalog;
+mod collections;
 mod details;
 mod search;
 
 pub use catalog::{catalog_url, parse_cards, parse_last_page};
+pub use collections::{collection_url, parse_collections};
 pub(crate) use details::extract_favs;
 pub use details::parse_details;
 pub use search::search_url;

@@ -4,7 +4,7 @@
 Команды `tauri::command` добавляет `src-tauri` (#015), здесь только `AppService` и DTO с `serde` и `specta::Type`.
 
 Реэкспортировано из корня крейта: `AppService`, `BootState`, `UserDto`, `MirrorDto`, `MirrorStateDto`,
-`MediaKindDto`, `MediaItemDto`, `MediaDetailsDto`, `TranslatorDto`, `SeasonDto`, `EpisodeDto`,
+`MediaKindDto`, `MediaItemDto`, `MediaDetailsDto`, `CollectionDto`, `TranslatorDto`, `SeasonDto`, `EpisodeDto`,
 `StreamQualityDto`, `PlayerProgressDto`, `PlayerErrorDto`, `IpcError`, `IpcErrorKind`, `ClientConfig`, `MirrorConfig`,
 `KeychainSecretStore`, `MemorySecretStore`, `MemoryMirrorStore`.
 
@@ -30,6 +30,8 @@ impl<S: SecretStore, M: MirrorStore> AppService<S, M> {
     pub async fn catalog(&self, kind: Option<MediaKindDto>, page: u32) -> Result<Vec<MediaItemDto>, IpcError>;
     pub async fn search(&self, query: String) -> Result<Vec<MediaItemDto>, IpcError>;
     pub async fn details(&self, item: MediaItemDto) -> Result<MediaDetailsDto, IpcError>;
+    pub async fn collections(&self) -> Result<Vec<CollectionDto>, IpcError>;
+    pub async fn collection_items(&self, collection: CollectionDto, page: u32) -> Result<Vec<MediaItemDto>, IpcError>;
     pub async fn episodes(&self, details: MediaDetailsDto) -> Result<Vec<EpisodeDto>, IpcError>;
     pub async fn streams(&self, item: MediaItemDto, translator_id: Option<u64>, episode: Option<EpisodeDto>) -> Result<Vec<StreamQualityDto>, IpcError>;
 }
@@ -60,10 +62,10 @@ impl<S: SecretStore, M: MirrorStore> AppService<S, M> {
   в адресе), путь, запрос и фрагмент отбрасываются. Затем `add_manual` и, при успехе, сброс сессии и cookie, потому что
   куки привязаны к домену. Следующие `login` и `boot` идут на новом зеркале. При ошибке (в том числе `Challenge`)
   активное зеркало и сессия не меняются. Введённый адрес в текст ошибки не попадает.
-- `catalog`, `search`, `details`, `episodes`, `streams`: тонкий слой над `kino_core::KinoProvider`, который реализует
-  `kino_api::HdrezkaApi` (`provider_impl.rs`). Логики парсинга или сети здесь нет — только выбор зеркала и
-  конвертация DTO. Ошибки `KinoProvider` (включая `AuthRequired`, `NotFound` → `internal`) идут через обычный
-  `From<KinoError> for IpcError`.
+- `catalog`, `search`, `details`, `episodes`, `streams`, `collections`, `collection_items`: тонкий слой над
+  `kino_core::KinoProvider`, который реализует `kino_api::HdrezkaApi` (`provider_impl.rs`). Логики парсинга или
+  сети здесь нет — только выбор зеркала и конвертация DTO. Ошибки `KinoProvider` (включая `AuthRequired`,
+  `NotFound` → `internal`) идут через обычный `From<KinoError> for IpcError`.
 - `streams` принимает `item: MediaItemDto` (не `MediaDetailsDto`) и **перезапрашивает детали внутри**
   (`provider.details(&item)`): потокам фильма нужен `raw_html` страницы (данные плеера `initCDN...Events`),
   а `MediaDetailsDto` его физически не несёт. `raw_html` остаётся в памяти и не сериализуется в сеть —
@@ -104,6 +106,7 @@ impl<S: SecretStore, M: MirrorStore> AppService<S, M> {
 | `MediaKindDto` | `movie`, `series`, `cartoon`, `anime` — зеркало `kino_core::MediaKind`, `From`/`Into` в обе стороны |
 | `MediaItemDto` | `{ id: number, title, originalTitle: string \| null, year: number \| null, kind: MediaKindDto, posterUrl: string \| null, pageUrl: string, rating: number \| null }`. `id` экспортируется как `number`; `posterUrl`/`pageUrl` — строки (не `Url`, у `specta` нет для него типа). `try_into_media_item` разбирает их обратно и возвращает `InvalidInput`, если UI подсунул испорченный DTO |
 | `MediaDetailsDto` | `{ item: MediaItemDto, description: string \| null, genres: string[], countries: string[], durationMinutes: number \| null, translators: TranslatorDto[], seasons: SeasonDto[] }`. Поля ровно эти — `raw_html` отсутствует физически, не просто скрыт сериализацией (см. тест `media_details_dto_has_no_raw_html_field_at_all`) |
+| `CollectionDto` | `{ id: number, title, url, posterUrl: string \| null, itemsCount: number \| null }`. `id` экспортируется как `number`; `url`/`posterUrl` — строки (не `Url`). `try_into_collection` разбирает их обратно и возвращает `InvalidInput`, если UI подсунул испорченный DTO |
 | `TranslatorDto` | `{ id: number, name: string }` |
 | `SeasonDto` | `{ number, episodes: number[] }` |
 | `EpisodeDto` | `{ seasonId, episodeId, title }` |
