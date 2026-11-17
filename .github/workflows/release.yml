@@ -16,8 +16,8 @@ jobs:
   # x86_64-бутылка mpv собирается Homebrew со Swift-кодом macOS-backend,
   # который требует символ AppKit, появившийся только в macOS 14+ — краш при
   # старте на более старых ОС (баг #11). Поэтому на x86_64 mpv собирается из
-  # исходников с патчем формулы (-Dswift-build=disabled), а не ставится
-  # готовой бутылкой.
+  # исходников с патчем формулы (Swift таргетирован на macOS 13.0), а не
+  # ставится готовой бутылкой.
   # ------------------------------------------------------------------------
   libmpv-x86_64:
     runs-on: macos-15-intel
@@ -27,19 +27,22 @@ jobs:
       # появившийся только в macOS 14 — краш при старте на более старых ОС
       # (баг #11). Патчим формулу прямо в чекауте тапа homebrew-core (install
       # по пути Homebrew отклоняет: "requires formulae to be in a tap") и
-      # собираем mpv из исходников с отключённым Swift; зависимости остаются
-      # бутылками.
+      # собираем mpv из исходников; зависимости остаются бутылками.
       # HOMEBREW_NO_INSTALL_FROM_API=1 обязателен: иначе brew резолвит
       # формулу из своего JSON API, игнорируя патч в локальном чекауте тапа.
-      - name: Install mpv (x86_64, built from source, Swift disabled — bug #11)
+      # Swift НЕЛЬЗЯ просто выключить — cocoa-код mpv всегда тянет
+      # сгенерированный osdep/mac/swift.h, а cocoa нужен для gl-cocoa
+      # (OpenGL render API, нужен kino-player через FFI). Таргетируем Swift
+      # явно на macOS 13.0 и выключаем только touch bar/media-key модули.
+      - name: Install mpv (x86_64, built from source, Swift targeted at macOS 13 — bug #11)
         env:
           HOMEBREW_NO_INSTALL_FROM_API: "1"
         run: |
           set -euo pipefail
           brew tap homebrew/core
           MPV_FORMULA="$(brew --repository homebrew/core)/Formula/m/mpv.rb"
-          perl -pi -e 's/(-Dbuild-date=false)/$1\n    -Dswift-build=disabled\n    -Dcplayer=false\n    -Dc_args=-mmacosx-version-min=13.0\n    -Dobjc_args=-mmacosx-version-min=13.0\n    -Dc_link_args=-mmacosx-version-min=13.0\n    -Dobjc_link_args=-mmacosx-version-min=13.0/' "$MPV_FORMULA"
-          grep -q 'Dswift-build=disabled' "$MPV_FORMULA" || {
+          perl -pi -e 's/(-Dbuild-date=false)/$1\n    -Dcplayer=false\n    -Dmacos-touchbar=disabled\n    -Dmacos-media-player=disabled\n    -Dswift-flags=-target\\ x86_64-apple-macosx13.0\n    -Dc_args=-mmacosx-version-min=13.0\n    -Dobjc_args=-mmacosx-version-min=13.0\n    -Dc_link_args=-mmacosx-version-min=13.0\n    -Dobjc_link_args=-mmacosx-version-min=13.0/' "$MPV_FORMULA"
+          grep -q 'Dswift-flags' "$MPV_FORMULA" || {
             echo "ERROR: patch did not apply to mpv.rb (upstream formula changed?)" >&2
             exit 1
           }
@@ -209,7 +212,8 @@ jobs:
 
           # Регрессия бага #11: убеждаемся, что x86_64-слайс libmpv реально
           # таргетит старую macOS, а не тянет Swift-код с AppKit-символом,
-          # появившимся в 14+ (см. -Dswift-build=disabled выше).
+          # появившимся в 14+ (см. -Dswift-flags/-Dmacos-touchbar/
+          # -Dmacos-media-player выше).
           MIN_VER=$(otool -arch x86_64 -l "$APP/Contents/Frameworks/libmpv.2.dylib" \
             | awk '$1=="minos" || $1=="version" {print $2; exit}')
           if [[ -z "$MIN_VER" ]]; then
