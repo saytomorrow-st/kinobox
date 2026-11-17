@@ -11,7 +11,7 @@
 | `MediaKind` | `Movie`, `Series`, `Cartoon`, `Anime` (serde `snake_case`) |
 | `MediaItem` | `id: u64`, `title: String`, `original_title: Option<String>`, `year: Option<u16>`, `kind: MediaKind`, `poster_url: Option<Url>`, `page_url: Url`, `rating: Option<f32>` |
 | `MediaDetails` | `item: MediaItem`, `description: Option<String>`, `genres: Vec<String>`, `countries: Vec<String>`, `duration_minutes: Option<u32>`, `translators: Vec<Translator>`, `seasons: Vec<Season>`, `raw_html: Option<String>` |
-| `Translator` | `id: u64`, `name: String` |
+| `Translator` | `id: u64`, `name: String`, `premium: bool` (маркер CSS-класса `b-prem_translator` на `<li>` списка озвучек; `#[serde(default)]` для обратной совместимости старого кэша) |
 | `Season` | `number: u16`, `episodes: Vec<u16>` |
 | `Episode` | `season_id: u32`, `episode_id: u32`, `title: String` |
 | `Collection` | `id: u64`, `title: String`, `url: Url`, `poster_url: Option<Url>`, `items_count: Option<u32>` |

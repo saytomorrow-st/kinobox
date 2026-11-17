@@ -162,6 +162,14 @@ export function DetailsView({
                       }`}
                     >
                       {translator.name}
+                      {translator.premium && (
+                        <span
+                          title="Платная премиум-озвучка: без подписки вместо потока может проиграться напоминающий ролик"
+                          className="ml-1.5 rounded bg-premium/20 px-1 py-0.5 text-[0.65rem] font-semibold uppercase tracking-wide text-premium"
+                        >
+                          Premium
+                        </span>
+                      )}
                     </button>
                   ))}
                 </div>

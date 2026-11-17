@@ -299,6 +299,8 @@ pub struct TranslatorDto {
     #[specta(type = Number)]
     pub id: u64,
     pub name: String,
+    /// Премиум-озвучка (платная): пометка в UI, выбор не блокирует.
+    pub premium: bool,
 }
 
 impl From<&Translator> for TranslatorDto {
@@ -306,6 +308,7 @@ impl From<&Translator> for TranslatorDto {
         Self {
             id: translator.id,
             name: translator.name.clone(),
+            premium: translator.premium,
         }
     }
 }
@@ -384,6 +387,7 @@ impl MediaDetailsDto {
                 .map(|translator| Translator {
                     id: translator.id,
                     name: translator.name.clone(),
+                    premium: translator.premium,
                 })
                 .collect(),
             seasons: self
@@ -639,6 +643,7 @@ mod tests {
             translators: vec![Translator {
                 id: 1,
                 name: "Дублированный".to_string(),
+                premium: false,
             }],
             seasons: vec![Season {
                 number: 1,
@@ -752,10 +757,11 @@ mod tests {
         let translator = TranslatorDto::from(&Translator {
             id: 1,
             name: "Дублированный".to_string(),
+            premium: false,
         });
         assert_eq!(
             serde_json::to_value(&translator).unwrap(),
-            json!({"id": 1, "name": "Дублированный"})
+            json!({"id": 1, "name": "Дублированный", "premium": false})
         );
         roundtrip(&translator);
 

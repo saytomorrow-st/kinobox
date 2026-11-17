@@ -60,6 +60,10 @@ pub struct MediaDetails {
 pub struct Translator {
     pub id: u64,
     pub name: String,
+    /// Премиум-озвучка: маркер CSS-класса `b-prem_translator` на `<li>`
+    /// (аналог `StreamQuality::premium`). Выбор не блокирует — только пометка.
+    #[serde(default)]
+    pub premium: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -142,6 +146,12 @@ mod tests {
         roundtrip(&Translator {
             id: 55,
             name: "Дублированный".to_string(),
+            premium: false,
+        });
+        roundtrip(&Translator {
+            id: 56,
+            name: "Premium-озвучка".to_string(),
+            premium: true,
         });
     }
 
@@ -192,6 +202,7 @@ mod tests {
             translators: vec![Translator {
                 id: 1,
                 name: "Дублированный".to_string(),
+                premium: false,
             }],
             seasons: vec![],
             raw_html: None,

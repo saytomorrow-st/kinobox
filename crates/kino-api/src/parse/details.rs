@@ -227,7 +227,10 @@ fn parse_translators(
             if name.is_empty() {
                 return None;
             }
-            Some(Translator { id, name })
+            let premium = li
+                .value()
+                .has_class("b-prem_translator", scraper::CaseSensitivity::CaseSensitive);
+            Some(Translator { id, name, premium })
         })
         .collect();
     if !translators.is_empty() {
@@ -238,7 +241,11 @@ fn parse_translators(
         return Ok(Vec::new());
     };
     let name = info_field(rows, &["В переводе"]).unwrap_or_default();
-    Ok(vec![Translator { id, name }])
+    Ok(vec![Translator {
+        id,
+        name,
+        premium: false,
+    }])
 }
 
 /// Второй числовой аргумент `initCDNMoviesEvents(id, translator_id, ...)` или
@@ -363,8 +370,37 @@ mod tests {
             details.translators,
             vec![Translator {
                 id: 45,
-                name: String::new()
+                name: String::new(),
+                premium: false,
             }]
+        );
+    }
+
+    #[test]
+    fn translator_list_marks_premium_class() {
+        // Класс `b-prem_translator` по референс-библиотеке kristal374/hdrezka-api
+        // (extract_translators); живой разметкой kvk.pub не подтверждён.
+        let html = r#"<html><body><input id="post_id" value="3"><div class="b-post__title"><h1>Фильм</h1></div>
+            <ul id="translators-list">
+                <li data-translator_id="1" class="b-translator__item">Обычный</li>
+                <li data-translator_id="2" class="b-translator__item b-prem_translator">Premium</li>
+            </ul>
+        </body></html>"#;
+        let details = parse_details(html, &url()).expect("детали");
+        assert_eq!(
+            details.translators,
+            vec![
+                Translator {
+                    id: 1,
+                    name: "Обычный".to_string(),
+                    premium: false,
+                },
+                Translator {
+                    id: 2,
+                    name: "Premium".to_string(),
+                    premium: true,
+                },
+            ]
         );
     }
 

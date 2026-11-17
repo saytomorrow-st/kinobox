@@ -26,8 +26,8 @@ function details(base: MediaItemDto, overrides: Partial<MediaDetailsDto> = {}): 
     countries: ["США", "Канада"],
     durationMinutes: 125,
     translators: [
-      { id: 1, name: "Дубляж" },
-      { id: 2, name: "Многоголосый" },
+      { id: 1, name: "Дубляж", premium: false },
+      { id: 2, name: "Многоголосый", premium: false },
     ],
     seasons: [],
     ...overrides,
@@ -110,6 +110,19 @@ describe("DetailsView", () => {
     expect(html).toContain("Дубляж");
     expect(html).toContain("Многоголосый");
     expect(html).toContain("★ 8.8");
+  });
+
+  it("помечает premium-озвучку бейджем, обычную — нет", () => {
+    const html = render({
+      details: details(filmItem, {
+        translators: [
+          { id: 1, name: "Дубляж", premium: false },
+          { id: 2, name: "Premium-озвучка", premium: true },
+        ],
+      }),
+    });
+    expect(html).toContain("Premium-озвучка");
+    expect(html.match(/<span[^>]*>Premium<\/span>/g)).toHaveLength(1);
   });
 
   it("форматирует длительность", () => {

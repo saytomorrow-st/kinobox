@@ -36,7 +36,7 @@ function details(base: MediaItemDto, overrides: Partial<MediaDetailsDto> = {}): 
     genres: ["драма"],
     countries: ["США"],
     durationMinutes: 120,
-    translators: [{ id: 1, name: "Дубляж" }],
+    translators: [{ id: 1, name: "Дубляж", premium: false }],
     seasons: [],
     ...overrides,
   };
@@ -135,8 +135,8 @@ describe("openFor", () => {
   it("берёт id первого перевода, а без переводов оставляет null", async () => {
     const withTranslators = details(film, {
       translators: [
-        { id: 7, name: "Первый" },
-        { id: 9, name: "Второй" },
+        { id: 7, name: "Первый", premium: false },
+        { id: 9, name: "Второй", premium: false },
       ],
     });
     const store = createDetailsStore(

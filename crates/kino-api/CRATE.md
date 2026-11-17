@@ -381,7 +381,9 @@ impl HdrezkaApi {
 `.b-post__title h1`, `.b-post__origtitle`, `.b-post__description_text`,
 таблица `.b-post__info` (строки `tr`, в первой ячейке `h2`-заголовок поля),
 `#translators-list li[data-translator_id]`, рейтинг `.b-post__rating span.num`,
-постер `img[itemprop="image"]`.
+постер `img[itemprop="image"]`. Premium-озвучка: `<li>` с CSS-классом
+`b-prem_translator` даёт `Translator.premium = true` (по референс-библиотеке
+kristal374/hdrezka-api; живой разметкой kvk.pub селектор не подтверждён, #037).
 
 Расхождения с исходным списком, выясненные по фикстуре (прав реальный HTML):
 

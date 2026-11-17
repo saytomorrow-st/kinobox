@@ -107,7 +107,7 @@ impl<S: SecretStore, M: MirrorStore> AppService<S, M> {
 | `MediaItemDto` | `{ id: number, title, originalTitle: string \| null, year: number \| null, kind: MediaKindDto, posterUrl: string \| null, pageUrl: string, rating: number \| null }`. `id` экспортируется как `number`; `posterUrl`/`pageUrl` — строки (не `Url`, у `specta` нет для него типа). `try_into_media_item` разбирает их обратно и возвращает `InvalidInput`, если UI подсунул испорченный DTO |
 | `MediaDetailsDto` | `{ item: MediaItemDto, description: string \| null, genres: string[], countries: string[], durationMinutes: number \| null, translators: TranslatorDto[], seasons: SeasonDto[] }`. Поля ровно эти — `raw_html` отсутствует физически, не просто скрыт сериализацией (см. тест `media_details_dto_has_no_raw_html_field_at_all`) |
 | `CollectionDto` | `{ id: number, title, url, posterUrl: string \| null, itemsCount: number \| null }`. `id` экспортируется как `number`; `url`/`posterUrl` — строки (не `Url`). `try_into_collection` разбирает их обратно и возвращает `InvalidInput`, если UI подсунул испорченный DTO |
-| `TranslatorDto` | `{ id: number, name: string }` |
+| `TranslatorDto` | `{ id: number, name: string, premium: boolean }` |
 | `SeasonDto` | `{ number, episodes: number[] }` |
 | `EpisodeDto` | `{ seasonId, episodeId, title }` |
 | `StreamQualityDto` | `{ label, url, premium, hls: string \| null, fallbacks: string[] }`. `try_into_stream_quality` разбирает адреса обратно в `StreamQuality` и возвращает `InvalidInput` на испорченный URL — использует `src-tauri` (#021) для загрузки потока в `kino-player` |

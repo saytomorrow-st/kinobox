@@ -154,6 +154,8 @@ export type StreamQualityDto = {
 export type TranslatorDto = {
 	id: number,
 	name: string,
+	/**  Премиум-озвучка (платная): пометка в UI, выбор не блокирует. */
+	premium: boolean,
 };
 
 /**

@@ -1,7 +1,7 @@
 ---
 id: 037
 type: feature
-status: open
+status: done
 model: deepseek-v4-pro
 crate: kino-core
 created: 2026-11-18
@@ -90,3 +90,21 @@ UI, чтобы пользователь не пытался их включит�
 ## Заметки
 
 [Ведёт агент: ход работы, найденные нюансы, blockers]
+
+Готово (2026-11-18). `Translator.premium: bool` (+`#[serde(default)]` для
+старого кэша), парсинг `has_class("b-prem_translator")` в `parse_translators()`,
+`TranslatorDto.premium`, бейдж «Premium» в DetailsView (цвет `premium:
+"#FFD60A"` добавлен в tailwind-тему, выбора не блокирует, есть tooltip).
+
+**Уровень уверенности в селекторе: СРЕДНИЙ-НИЗКИЙ.** Класс
+`b-prem_translator` взят только из референс-библиотеки
+kristal374/hdrezka-api (`movie_player_builder.py::extract_translators`);
+живой разметкой текущего зеркала kvk.pub НЕ подтверждён (живой вход в этой
+среде запрещён ограничениями). **Просьба заказчику:** после сборки открыть
+фильм с известной платной озвучкой и проверить, что бейдж появляется. Если
+нет — прислать фрагмент HTML `<ul id="translators-list">`, поправим селектор.
+
+UI-фикстуры обновлены (`premium: false`), добавлены тесты: парсинг класса
+(kino-api), roundtrip premium=true/false (kino-core), camelCase DTO
+(kino-ipc), бейдж в DetailsView (ui). bindings.ts обновлён вручную по
+паттерну #033 — ожидается прогон CI-джобы `bindings` для сверки.
