@@ -10,6 +10,7 @@ export default {
         text: "#F5F5F7",
         "text-2": "#86868B",
         accent: "#FA233B",
+        premium: "#FFD60A",
         status: {
           open: "#30D158",
           login: "#FFD60A",

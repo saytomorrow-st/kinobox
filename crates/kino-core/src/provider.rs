@@ -145,6 +145,7 @@ mod tests {
                     translators: vec![Translator {
                         id: 1,
                         name: "Дублированный".to_string(),
+                        premium: false,
                     }],
                     seasons: vec![crate::media::Season {
                         number: 1,
