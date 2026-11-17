@@ -207,6 +207,22 @@ jobs:
           fi
           echo "libmpv.2.dylib x86_64 minimum macOS: $MIN_VER (OK)"
 
+          # Регрессия бага #12: ffmpeg's libavdevice не должен тянуть
+          # AVFoundation-символ захвата камеры (нужен только на macOS 14+,
+          # см. --disable-avfoundation выше).
+          AVDEV="$APP/Contents/Frameworks/libavdevice.63.dylib"
+          if nm -arch x86_64 "$AVDEV" 2>/dev/null | grep -q '_AVCaptureDeviceTypeContinuityCamera'; then
+            echo "ERROR: libavdevice.63.dylib (x86_64) still references AVCaptureDeviceTypeContinuityCamera — bug #12 regressed" >&2
+            exit 1
+          fi
+          AVDEV_MIN=$(otool -arch x86_64 -l "$AVDEV" \
+            | awk '$1=="minos" || $1=="version" {print $2; exit}')
+          if [[ -n "$AVDEV_MIN" ]] && (( ${AVDEV_MIN%%.*} > 13 )); then
+            echo "ERROR: libavdevice.63.dylib (x86_64) requires macOS ${AVDEV_MIN}+ — bug #12 regressed" >&2
+            exit 1
+          fi
+          echo "libavdevice.63.dylib x86_64: no ContinuityCamera symbol, minimum macOS ${AVDEV_MIN:-unknown} (OK)"
+
       # path указывает на родительскую папку (bundle/macos), а не на сам
       # KinoBox.app: upload-artifact при загрузке ОДНОЙ директории кладёт в
       # архив её СОДЕРЖИМОЕ, теряя имя самой директории — т.е. если указать
@@ -271,6 +287,29 @@ jobs:
       - name: Install tauri-cli
         run: cargo install tauri-cli --version "^2.0" --locked
 
+      # Бутылка ffmpeg для x86_64 тащит libavdevice с AVFoundation-кодом
+      # захвата камеры/экрана, который на macOS 14+ использует
+      # AVCaptureDeviceTypeContinuityCamera — на 13.x краш при старте
+      # (баг #12, "Symbol not found: _AVCaptureDeviceTypeContinuityCamera").
+      # KinoBox — чисто плеер, захват устройств не нужен вообще.
+      # Та же схема патча тапа, что и у mpv ниже (баг #11): Homebrew не
+      # принимает install по пути файла, поэтому правим формулу прямо в
+      # чекауте homebrew-core и ставим по имени с HOMEBREW_NO_INSTALL_FROM_API,
+      # иначе brew резолвит через JSON API и игнорирует патч.
+      - name: Install ffmpeg (x86_64, built from source, --disable-avfoundation — bug #12)
+        env:
+          HOMEBREW_NO_INSTALL_FROM_API: "1"
+        run: |
+          set -euo pipefail
+          brew tap homebrew/core
+          FFMPEG_FORMULA="$(brew --repository homebrew/core)/Formula/f/ffmpeg.rb"
+          perl -pi -e 's/(--enable-openssl)/$1\n      --disable-avfoundation/' "$FFMPEG_FORMULA"
+          grep -q 'disable-avfoundation' "$FFMPEG_FORMULA" || {
+            echo "ERROR: patch did not apply to ffmpeg.rb (upstream formula changed?)" >&2
+            exit 1
+          }
+          brew install --build-from-source ffmpeg
+
       # Бутылка mpv для x86_64 собирается Homebrew со Swift-кодом macOS-backend
       # (Touch Bar / media-key интеграция), который тянет символ AppKit,
       # появившийся только в macOS 14 — на 13.x бинарь падает при старте
@@ -278,8 +317,8 @@ jobs:
       # `brew install --build-from-source` не принимает произвольный .rb-файл
       # по пути ("Homebrew requires formulae to be in a tap") — поэтому
       # патчим формулу ПРЯМО в чекауте тапа homebrew-core и ставим по имени.
-      # Зависимости (ffmpeg, libass, ...) остаются обычными бутылками —
-      # Swift-код есть только в самом mpv.
+      # ffmpeg уже собран из исходников шагом выше (баг #12) — brew увидит
+      # зависимость удовлетворённой и бутылку поверх не нальёт.
       #
       # HOMEBREW_NO_INSTALL_FROM_API=1 обязателен: иначе brew резолвит
       # формулу из своего JSON API (кэш ghcr.io), игнорируя патч в
@@ -391,6 +430,22 @@ jobs:
           fi
           echo "libmpv.2.dylib minimum macOS: $MIN_VER (OK)"
 
+          # Регрессия бага #12: ffmpeg's libavdevice не должен тянуть
+          # AVFoundation-символ захвата камеры (нужен только на macOS 14+,
+          # см. --disable-avfoundation выше).
+          AVDEV="$APP/Contents/Frameworks/libavdevice.63.dylib"
+          if nm "$AVDEV" 2>/dev/null | grep -q '_AVCaptureDeviceTypeContinuityCamera'; then
+            echo "ERROR: libavdevice.63.dylib still references AVCaptureDeviceTypeContinuityCamera — bug #12 regressed" >&2
+            exit 1
+          fi
+          AVDEV_MIN=$(otool -l "$AVDEV" \
+            | awk '$1=="minos" || $1=="version" {print $2; exit}')
+          if [[ -n "$AVDEV_MIN" ]] && (( ${AVDEV_MIN%%.*} > 13 )); then
+            echo "ERROR: libavdevice.63.dylib requires macOS ${AVDEV_MIN}+ — bug #12 regressed" >&2
+            exit 1
+          fi
+          echo "libavdevice.63.dylib: no ContinuityCamera symbol, minimum macOS ${AVDEV_MIN:-unknown} (OK)"
+
       # path — родительская папка, не сам .app (см. комментарий у universal
       # job'а выше: upload-artifact разворачивает одну директорию без
       # обёртки её именем).
@@ -408,11 +463,29 @@ jobs:
     if: ${{ inputs.arch != 'x86_64' }}
     runs-on: macos-15-intel
     steps:
+      # Та же причина, что в job'е build-x86_64 (баг #12): ffmpeg-бутылка
+      # тащит libavdevice с AVFoundation-кодом захвата, который на macOS
+      # 14+ использует AVCaptureDeviceTypeContinuityCamera — краш на 13.x.
+      # KinoBox — только плеер, захват не нужен.
+      - name: Install ffmpeg (x86_64, built from source, --disable-avfoundation — bug #12)
+        env:
+          HOMEBREW_NO_INSTALL_FROM_API: "1"
+        run: |
+          set -euo pipefail
+          brew tap homebrew/core
+          FFMPEG_FORMULA="$(brew --repository homebrew/core)/Formula/f/ffmpeg.rb"
+          perl -pi -e 's/(--enable-openssl)/$1\n      --disable-avfoundation/' "$FFMPEG_FORMULA"
+          grep -q 'disable-avfoundation' "$FFMPEG_FORMULA" || {
+            echo "ERROR: patch did not apply to ffmpeg.rb (upstream formula changed?)" >&2
+            exit 1
+          }
+          brew install --build-from-source ffmpeg
+
       # Та же причина, что и в job'е build-x86_64 выше (баг #11): бутылка
       # mpv для x86_64 собрана со Swift-кодом macOS-backend, который требует
       # macOS 14+. Собираем из исходников, патчим формулу прямо в чекауте
       # тапа homebrew-core (install по пути отклоняется Homebrew'ом:
-      # "requires formulae to be in a tap").
+      # "requires formulae to be in a tap"). ffmpeg уже собран выше (баг #12).
       # HOMEBREW_NO_INSTALL_FROM_API=1 обязателен: иначе brew резолвит
       # формулу из своего JSON API, игнорируя патч в локальном чекауте тапа.
       # Swift НЕЛЬЗЯ просто выключить — cocoa-код mpv всегда тянет
