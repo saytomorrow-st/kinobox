@@ -96,13 +96,29 @@ pub fn open_player(
             let handle = app.clone();
             let shared = Arc::clone(&shared);
             window.on_window_event(move |event| {
-                if matches!(
-                    event,
-                    WindowEvent::CloseRequested { .. } | WindowEvent::Destroyed
-                ) {
-                    log::debug!("окно {PLAYER}: CloseRequested/Destroyed — очистка");
-                    close_player_controls(&handle);
-                    *shared.lock().unwrap() = None;
+                match event {
+                    WindowEvent::CloseRequested { .. } | WindowEvent::Destroyed => {
+                        log::debug!("окно {PLAYER}: CloseRequested/Destroyed — очистка");
+                        close_player_controls(&handle);
+                        *shared.lock().unwrap() = None;
+                    }
+                    // #031: `player` — безрамочное окно без веб-контента; `player-controls` —
+                    // его дочерний оверлей (`parent: "player"`), и именно с ним пользователь
+                    // взаимодействует (кнопки/seek/громкость). Когда фокус уходит на `main` и
+                    // возвращается кликом по плееру, оверлей мог остаться «за» `player`/не стать
+                    // key-окном повторно — плеер выглядел «мёртвым». На каждый возврат фокуса
+                    // явно поднимаем `player-controls` вперёд, чтобы оверлей снова стал
+                    // кликабельным. `main` при этом не трогаем: пользователь сам решил вернуться
+                    // к плееру, переключаться между окнами по-прежнему можно.
+                    WindowEvent::Focused(true) => {
+                        if let Some(controls) = handle.get_webview_window(PLAYER_CONTROLS) {
+                            log::debug!("окно {PLAYER}: Focused — поднимаю {PLAYER_CONTROLS}");
+                            if let Err(err) = controls.set_focus() {
+                                log::warn!("окно {PLAYER_CONTROLS}: focus не удался: {err}");
+                            }
+                        }
+                    }
+                    _ => {}
                 }
             });
             window
