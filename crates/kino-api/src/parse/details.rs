@@ -369,6 +369,16 @@ mod tests {
     }
 
     #[test]
+    fn extracts_favs_from_real_film_fixture() {
+        // Реальная (обезличенная) разметка kvk.pub: инпут есть, value обнулён санитайзером.
+        let html = include_str!("../../tests/fixtures/film_85038.html");
+        assert_eq!(
+            extract_favs(html).as_deref(),
+            Some("00000000-0000-0000-0000-000000000000")
+        );
+    }
+
+    #[test]
     fn extracts_favs_from_ctrl_favs_input() {
         let html = r#"<html><body>
             <input type="hidden" id="ctrl_favs" value="123e4567-e89b-12d3-a456-426614174000" />

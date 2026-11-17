@@ -44,6 +44,14 @@ impl KinoProvider for HdrezkaApi {
             .as_deref()
             .and_then(extract_favs)
             .unwrap_or_default();
+        if favs.is_empty() {
+            log::warn!(
+                "episodes: favs пуст (#ctrl_favs не найден или без value) для id={}; \
+                 эталонная либа в этом случае просто не шлёт поле — возможная, но не \
+                 доказанная причина сбоя get_episodes",
+                details.item.id
+            );
+        }
         let map = self
             .episodes_list(&details.item, translator_id, &favs)
             .await?;
@@ -69,6 +77,12 @@ impl KinoProvider for HdrezkaApi {
                     .as_deref()
                     .and_then(extract_favs)
                     .unwrap_or_default();
+                if favs.is_empty() {
+                    log::warn!(
+                        "streams: favs пуст (#ctrl_favs не найден или без value) для id={}",
+                        details.item.id
+                    );
+                }
                 self.stream_url(
                     post_id,
                     translator_id,
