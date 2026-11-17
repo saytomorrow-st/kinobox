@@ -1,11 +1,20 @@
 //! Окна создаёт и закрывает Rust. Настройки берутся из `tauri.conf.json`.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use kino_ipc::{IpcError, IpcErrorKind};
 use kino_player::WindowedPlayer;
 use tauri::utils::config::WindowConfig;
-use tauri::{AppHandle, Manager, WebviewWindowBuilder, WindowEvent};
+use tauri::{AppHandle, Manager, PhysicalPosition, WebviewWindowBuilder, WindowEvent};
+
+/// #035: смещение `player` относительно `main`, снятое в момент открытия плеера.
+/// `None` = плеер закрыт → синхронизация выключена.
+static PLAYER_SYNC_OFFSET: Mutex<Option<(i32, i32)>> = Mutex::new(None);
+/// #035: подписка на `Moved`/`Resized` окна `main` ставится один раз
+/// (окно `main` живёт дольше `player`, при повторном открытии плеера
+/// обработчик не должен навешиваться второй раз).
+static PLAYER_SYNC_ATTACHED: AtomicBool = AtomicBool::new(false);
 
 pub const LOGIN: &str = "login";
 pub const MAIN: &str = "main";
@@ -101,6 +110,9 @@ pub fn open_player(
                         log::debug!("окно {PLAYER}: CloseRequested/Destroyed — очистка");
                         close_player_controls(&handle);
                         *shared.lock().unwrap() = None;
+                        // #035: плеер закрыт — синхронизацию позиции выключаем,
+                        // обработчик `main` видит `None` и больше ничего не двигает.
+                        *PLAYER_SYNC_OFFSET.lock().unwrap() = None;
                     }
                     // #031: `player` — безрамочное окно без веб-контента; `player-controls` —
                     // его дочерний оверлей (`parent: "player"`), и именно с ним пользователь
@@ -132,8 +144,83 @@ pub fn open_player(
     // `open_player_controls()` делают то же самое, здесь вызов был пропущен.
     log::debug!("окно {PLAYER}: focus");
     window.set_focus().map_err(internal)?;
+    attach_player_sync(app, &window)?;
     open_player_controls(app)?;
     Ok(window)
+}
+
+/// #035: окно `player` визуально следует за `main` без AppKit-связи (`parent`/
+/// `addChildWindow` отклонены в #031 — они синхронизируют minimize/close).
+///
+/// Схема: при открытии плеера запоминаем смещение `player` относительно `main`
+/// (в физических пикселях); подписка на `Moved`/`Resized` окна `main` при каждом
+/// событии ставит `player` в `main.position + offset`. Размер `player` не
+/// меняется — плеер «ездит» вместе с главным окном, оставаясь независимым окном.
+///
+/// Порог срабатывания: `PLAYER_SYNC_OFFSET == None` (плеер закрыт) или `main`
+/// в fullscreen — синхронизация не применяется (безопасный no-op), поэтому
+/// fullscreen-переходы не уводят плеер и не ломают геометрию. Ошибка применения
+/// логируется `warn!`, не паникует.
+fn attach_player_sync(app: &AppHandle, player: &tauri::Window) -> Result<(), IpcError> {
+    let main = match app.get_webview_window(MAIN) {
+        Some(main) => main,
+        None => {
+            // Плеер открывается только из `main` — но если окно вдруг недоступно,
+            // просто остаёмся без синхронизации, это не ошибка открытия плеера.
+            log::debug!("окно {PLAYER}: {MAIN} недоступен — синхронизация позиции выключена");
+            return Ok(());
+        }
+    };
+
+    let main_pos = main.outer_position().map_err(internal)?;
+    let player_pos = player.outer_position().map_err(internal)?;
+    let offset = (player_pos.x - main_pos.x, player_pos.y - main_pos.y);
+    *PLAYER_SYNC_OFFSET.lock().unwrap() = Some(offset);
+    log::debug!("окно {PLAYER}: синхронизация позиции, смещение {offset:?}");
+
+    if PLAYER_SYNC_ATTACHED.swap(true, Ordering::SeqCst) {
+        // Подписка на `main` уже стоит с прошлого открытия — она сама прочитает
+        // новое смещение, повторно навешивать обработчик не нужно.
+        return Ok(());
+    }
+
+    let handle = app.clone();
+    main.on_window_event(move |event| match event {
+        WindowEvent::Moved(_) | WindowEvent::Resized(_) => {
+            let offset = match *PLAYER_SYNC_OFFSET.lock().unwrap() {
+                Some(offset) => offset,
+                // Плеер закрыт — обработчик остаётся, но ничего не двигает.
+                None => return,
+            };
+            let main = match handle.get_webview_window(MAIN) {
+                Some(main) => main,
+                None => return,
+            };
+            let player = match handle.get_window(PLAYER) {
+                Some(player) => player,
+                None => return,
+            };
+            match main.is_fullscreen() {
+                Ok(true) => {
+                    log::trace!("окно {PLAYER}: {MAIN} в fullscreen — пропускаю синхронизацию");
+                    return;
+                }
+                Err(err) => {
+                    log::warn!("окно {PLAYER}: не удалось проверить fullscreen {MAIN}: {err}");
+                    return;
+                }
+                Ok(false) => {}
+            }
+            if let Ok(main_pos) = main.outer_position() {
+                let target = PhysicalPosition::new(main_pos.x + offset.0, main_pos.y + offset.1);
+                if let Err(err) = player.set_position(target) {
+                    log::warn!("окно {PLAYER}: синхронизация позиции не удалась: {err}");
+                }
+            }
+        }
+        _ => {}
+    });
+    Ok(())
 }
 
 fn open_player_controls(app: &AppHandle) -> Result<(), IpcError> {
