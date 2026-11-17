@@ -1,7 +1,7 @@
 ---
 id: 032
 type: bug
-status: open
+status: review
 model: deepseek-v4-pro
 crate: kino-ipc, src-tauri
 created: 2026-11-17
@@ -141,3 +141,57 @@ macOS 13.7.8). На ней:
 он зависает. Финальная диагностика бага #1 может потребовать ещё один
 раунд после получения свежего лога от пользователя (лог теперь полезен —
 баг #028 про шумные логи уже исправлен).
+
+### Реализация (subagent deepseek-v4-pro, 17.11.2026)
+
+Ветка `fix/032-boot-timeout-safety-net`, PR #33
+(https://github.com/saytomorrow-st/kinobox/pull/33).
+
+Сделано ровно то, что в разделе «Исправление»:
+
+- `src-tauri/src/commands.rs` → `boot`: `service.boot().await` обёрнут в
+  `tokio::time::timeout(Duration::from_secs(60), …)`; по истечении
+  возвращается `BootState::Unavailable` с сообщением «Запуск занял слишком
+  много времени. Попробуйте ещё раз.» (тот же Unavailable-экран, что и при
+  сбое зеркал/сети — фронтенд не трогался).
+- `src-tauri/Cargo.toml`: у `tokio` включён фича-флаг `time` (иначе
+  `tokio::time::timeout` недоступен).
+- `crates/kino-ipc/src/session.rs` → `AppService::boot()`: добавлен
+  `log::info!("boot: данные из Keychain загружены — разрешаю зеркало")`
+  сразу после `secrets.load()` и перед `pool.resolve()` — граница
+  Keychain/сеть, по которой в следующем логе видно, где зависает `boot()`.
+
+Сетевые таймауты (`client.rs`/`mirrors.rs`) не тронуты. Публичный API
+крейтов не менялся — `CRATE.md`/`ARCHITECTURE.md` не трогались.
+
+### Нюансы
+
+- Задача выполнялась параллельно с #029/#030/#031: все subagent'ы делили
+  один рабочий каталог `/Users/saytomorrow/kinobox`, из-за чего в нём
+  смешивались чужие незакоммиченные правки (favs-поле #030, player-error
+  #029) и ветка менялась под ногами. Чтобы не загрязнить чужую работу,
+  фикс сделан в изолированном worktree
+  (`~/.local/share/opencode/worktree/0de7dc/032-boot-timeout-safety-net`),
+  от `origin/main`, а мои правки из общего каталога не попали в чужой PR
+  (они были откачены/перезаписаны другими агентами до коммита — проверено
+  по `git status`).
+- Локальная верификация: `cargo check -p kino-ipc` прошёл зелёным (kino-ipc
+  не линкует `-lmpv`); `cargo check` для `src-tauri` на машине заказчика
+  запрещён (линкует `-lmpv`) — проверен только CI.
+
+### Финальный статус CI
+
+`gh pr checks 33` — зелёный (все три job прошли):
+
+- `bindings` pass (2m43s) — `export_bindings` скомпилировал и проверил,
+  что `bindings.ts` детерминирован (мой фикс не меняет сигнатуры команд).
+- `rust` pass (3m47s) — fmt/clippy/test/check ×2 target.
+- `ui` pass (39s).
+
+Нюанс CI: job `rust` дважды падал с transient-ошибкой «The job was not
+acquired by Runner of type hosted even after multiple attempts» (нехватка
+macOS arm64 раннеров из-за очереди параллельных PR #029–#031). Лечится
+`gh run rerun --failed`; код не менялся. На третьем прогоне раннер
+получился, `rust` прошёл зелёным.
+
+Готово к финальному ревью лид-агентом. Мерж не выполнялся.
