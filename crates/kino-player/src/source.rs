@@ -5,6 +5,15 @@ use kino_core::{StreamQuality, SubtitleTrack};
 
 use crate::mpv::Player;
 
+/// Для лога: `scheme://host:port` CDN-адреса без пути/query — там подписанные токены.
+fn stream_origin(url: &url::Url) -> String {
+    let mut origin = url.clone();
+    origin.set_path("");
+    origin.set_query(None);
+    origin.set_fragment(None);
+    origin.to_string()
+}
+
 impl Player {
     /// Загружает качество потока как текущий файл (`loadfile ... replace`).
     ///
@@ -12,6 +21,8 @@ impl Player {
     /// в этой задаче не задействованы — mpv сам умеет доигрывать HLS по прямому адресу,
     /// а выбор резервного адреса при обрыве основного решается в #018/#019.
     pub fn load_quality(&self, quality: &StreamQuality) -> libmpv2::Result<()> {
+        // Полный CDN-адрес содержит подписанные токены в query — в лог только origin.
+        log::info!("mpv loadfile: {}", stream_origin(&quality.url));
         self.mpv()
             .command("loadfile", &[quality.url.as_str(), "replace"])
     }
@@ -25,6 +36,11 @@ impl Player {
     /// Для `None` (например пока позиция ещё не известна) опция не передаётся.
     pub fn switch_quality(&self, quality: &StreamQuality) -> libmpv2::Result<()> {
         let position = self.position()?;
+        log::info!(
+            "mpv switch_quality: {} (позиция {:?})",
+            stream_origin(&quality.url),
+            position
+        );
         match position {
             Some(position) => self.mpv().command(
                 "loadfile",

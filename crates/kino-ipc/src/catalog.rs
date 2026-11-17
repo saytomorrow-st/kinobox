@@ -21,6 +21,7 @@ impl<S: SecretStore, M: MirrorStore> AppService<S, M> {
             page,
         };
         let items = provider.catalog(query).await?;
+        log::debug!("catalog: {} карточек", items.len());
         Ok(items.iter().map(MediaItemDto::from).collect())
     }
 
@@ -30,6 +31,7 @@ impl<S: SecretStore, M: MirrorStore> AppService<S, M> {
         // Явный путь трейта: у `HdrezkaApi` свой inherent `search(query, page)`,
         // который перекрывает одноимённый метод `KinoProvider` без пагинации.
         let items = KinoProvider::search(&provider, &query).await?;
+        log::debug!("search: {} результатов", items.len());
         Ok(items.iter().map(MediaItemDto::from).collect())
     }
 
@@ -46,6 +48,7 @@ impl<S: SecretStore, M: MirrorStore> AppService<S, M> {
         let provider = self.provider().await?;
         let details = details.try_into_media_details()?;
         let episodes = provider.episodes(&details).await?;
+        log::info!("episodes: {} серий", episodes.len());
         Ok(episodes.iter().map(EpisodeDto::from).collect())
     }
 
@@ -69,6 +72,7 @@ impl<S: SecretStore, M: MirrorStore> AppService<S, M> {
         let streams = provider
             .streams(&details, translator_id, episode.as_ref())
             .await?;
+        log::info!("streams: {} качеств", streams.len());
         Ok(streams.iter().map(StreamQualityDto::from).collect())
     }
 }

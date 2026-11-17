@@ -34,31 +34,37 @@ pub fn open(app: &AppHandle, label: &str) -> Result<(), IpcError> {
         Some(window) => window,
         None => {
             let config = find_window_config(app, label)?;
+            log::info!("окно {label}: создание");
             WebviewWindowBuilder::from_config(app, config)
                 .map_err(internal)?
                 .build()
                 .map_err(internal)?
         }
     };
+    log::debug!("окно {label}: show");
     window.show().map_err(internal)?;
+    log::debug!("окно {label}: focus");
     window.set_focus().map_err(internal)
 }
 
 pub fn close(app: &AppHandle, label: &str) {
     if let Some(window) = app.get_webview_window(label) {
         // Ошибка закрытия не меняет исход: окно уже уходит или приложение завершается.
+        log::debug!("окно {label}: close");
         let _ = window.close();
     }
 }
 
 /// Главное окно появляется раньше, чем закрывается окно входа: окон не бывает ноль.
 pub fn enter_main(app: &AppHandle) -> Result<(), IpcError> {
+    log::debug!("переход в main");
     open(app, MAIN)?;
     close(app, LOGIN);
     Ok(())
 }
 
 pub fn enter_login(app: &AppHandle) -> Result<(), IpcError> {
+    log::debug!("переход в login");
     open(app, LOGIN)?;
     close(app, MAIN);
     Ok(())
@@ -81,6 +87,7 @@ pub fn open_player(
             let config = find_window_config(app, PLAYER)?;
             // `player` — окно без веб-контента, поэтому не `WebviewWindowBuilder`, а голый
             // `WindowBuilder` (unstable API, включён в `Cargo.toml`).
+            log::info!("окно {PLAYER}: создание (без веб-контента)");
             let window = tauri::window::WindowBuilder::from_config(app, config)
                 .map_err(internal)?
                 .build()
@@ -93,6 +100,7 @@ pub fn open_player(
                     event,
                     WindowEvent::CloseRequested { .. } | WindowEvent::Destroyed
                 ) {
+                    log::debug!("окно {PLAYER}: CloseRequested/Destroyed — очистка");
                     close_player_controls(&handle);
                     *shared.lock().unwrap() = None;
                 }
@@ -101,6 +109,7 @@ pub fn open_player(
         }
     };
 
+    log::debug!("окно {PLAYER}: show");
     window.show().map_err(internal)?;
     open_player_controls(app)?;
     Ok(window)
@@ -111,25 +120,30 @@ fn open_player_controls(app: &AppHandle) -> Result<(), IpcError> {
         Some(controls) => controls,
         None => {
             let config = find_window_config(app, PLAYER_CONTROLS)?;
+            log::info!("окно {PLAYER_CONTROLS}: создание (parent={PLAYER})");
             WebviewWindowBuilder::from_config(app, config)
                 .map_err(internal)?
                 .build()
                 .map_err(internal)?
         }
     };
+    log::debug!("окно {PLAYER_CONTROLS}: show");
     controls.show().map_err(internal)?;
+    log::debug!("окно {PLAYER_CONTROLS}: focus");
     controls.set_focus().map_err(internal)
 }
 
 pub fn close_player(app: &AppHandle) {
     if let Some(window) = app.get_window(PLAYER) {
         // Закрытие окна плеера тянет за собой очистку состояния через `on_window_event`.
+        log::debug!("окно {PLAYER}: close");
         let _ = window.close();
     }
 }
 
 fn close_player_controls(app: &AppHandle) {
     if let Some(controls) = app.get_webview_window(PLAYER_CONTROLS) {
+        log::debug!("окно {PLAYER_CONTROLS}: close");
         let _ = controls.close();
     }
 }

@@ -15,6 +15,7 @@ futures-util.workspace = true
 keyring.workspace = true
 serde_json.workspace = true
 scraper.workspace = true
+log.workspace = true
 tokio = { workspace = true, features = ["rt", "time"] }
 
 [dev-dependencies]

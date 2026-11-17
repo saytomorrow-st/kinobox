@@ -12,6 +12,7 @@ url.workspace = true
 libmpv2 = "=7.0.1"
 raw-window-handle = { version = "=0.6.2", features = ["std"] }
 thiserror.workspace = true
+log.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "=0.6.5"

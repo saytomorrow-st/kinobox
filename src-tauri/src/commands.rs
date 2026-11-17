@@ -13,10 +13,16 @@ use crate::player_state::{player_error, PlayerState};
 use crate::state::Service;
 use crate::windows;
 
+/// Для логов: URL зеркала без query/fragment, чтобы не засветить лишнее.
+fn redact_url_for_log(raw: &str) -> &str {
+    raw.split(['?', '#']).next().unwrap_or(raw)
+}
+
 /// Окно входа создано скрытым и показывается только здесь, если вход не удался тихо.
 #[tauri::command]
 #[specta::specta]
 pub async fn boot(app: AppHandle, service: State<'_, Service>) -> Result<BootState, IpcError> {
+    log::debug!("cmd boot");
     let state = service.boot().await;
     let shown = match state {
         BootState::SignedIn { .. } => windows::enter_main(&app),
@@ -27,6 +33,7 @@ pub async fn boot(app: AppHandle, service: State<'_, Service>) -> Result<BootSta
     if let Err(err) = shown {
         // Окно входа скрыто: без него пользователь не увидит даже ошибку.
         let _ = windows::open(&app, windows::LOGIN);
+        log::error!("cmd boot: {err}");
         return Err(err);
     }
     Ok(state)
@@ -40,14 +47,24 @@ pub async fn login(
     email: String,
     password: String,
 ) -> Result<UserDto, IpcError> {
-    let user = service.login(email, password).await?;
+    // Пароль в лог не попадает никогда — только email для контекста.
+    log::debug!("cmd login: email={}", email.trim());
+    let user = match service.login(email, password).await {
+        Ok(user) => user,
+        Err(err) => {
+            log::warn!("cmd login: отказ: {err}");
+            return Err(err);
+        }
+    };
     windows::enter_main(&app)?;
+    log::info!("cmd login: ok, user_id={}", user.user_id);
     Ok(user)
 }
 
 #[tauri::command]
 #[specta::specta]
 pub async fn logout(app: AppHandle, service: State<'_, Service>) -> Result<(), IpcError> {
+    log::debug!("cmd logout");
     service.logout().await?;
     windows::enter_login(&app)
 }
@@ -55,24 +72,37 @@ pub async fn logout(app: AppHandle, service: State<'_, Service>) -> Result<(), I
 #[tauri::command]
 #[specta::specta]
 pub fn session(service: State<'_, Service>) -> Option<UserDto> {
-    service.session()
+    let session = service.session();
+    log::debug!(
+        "cmd session: {}",
+        session
+            .as_ref()
+            .map(|u| format!("user_id={}", u.user_id))
+            .unwrap_or_else(|| "нет сессии".to_string())
+    );
+    session
 }
 
 #[tauri::command]
 #[specta::specta]
 pub async fn mirrors(service: State<'_, Service>) -> Result<Vec<MirrorDto>, IpcError> {
+    log::debug!("cmd mirrors");
     Ok(service.mirrors().await)
 }
 
 #[tauri::command]
 #[specta::specta]
 pub async fn check_mirrors(service: State<'_, Service>) -> Result<Vec<MirrorDto>, IpcError> {
+    log::debug!("cmd check_mirrors");
     Ok(service.check_mirrors().await)
 }
 
 #[tauri::command]
 #[specta::specta]
 pub async fn add_mirror(service: State<'_, Service>, url: String) -> Result<MirrorDto, IpcError> {
+    // URL зеркала может содержать только scheme/host/port (parse_mirror_url это
+    // проверяет), но в лог кладём без query/fragment на всякий случай.
+    log::info!("cmd add_mirror: {}", redact_url_for_log(&url));
     service.add_mirror(url).await
 }
 
@@ -82,12 +112,14 @@ pub async fn select_mirror(
     service: State<'_, Service>,
     url: String,
 ) -> Result<MirrorDto, IpcError> {
+    log::info!("cmd select_mirror: {}", redact_url_for_log(&url));
     service.select_mirror(url).await
 }
 
 #[tauri::command]
 #[specta::specta]
 pub fn quit(app: AppHandle) {
+    log::info!("cmd quit");
     app.exit(0);
 }
 
@@ -98,7 +130,10 @@ pub async fn catalog(
     kind: Option<MediaKindDto>,
     page: u32,
 ) -> Result<Vec<MediaItemDto>, IpcError> {
-    service.catalog(kind, page).await
+    log::debug!("cmd catalog: kind={kind:?}, page={page}");
+    let items = service.catalog(kind, page).await?;
+    log::debug!("cmd catalog: ok, {} элементов", items.len());
+    Ok(items)
 }
 
 #[tauri::command]
@@ -107,6 +142,7 @@ pub async fn search(
     service: State<'_, Service>,
     query: String,
 ) -> Result<Vec<MediaItemDto>, IpcError> {
+    log::debug!("cmd search: query={query:?}");
     service.search(query).await
 }
 
@@ -116,6 +152,7 @@ pub async fn details(
     service: State<'_, Service>,
     item: MediaItemDto,
 ) -> Result<MediaDetailsDto, IpcError> {
+    log::debug!("cmd details: id={}", item.id);
     service.details(item).await
 }
 
@@ -125,6 +162,7 @@ pub async fn episodes(
     service: State<'_, Service>,
     details: MediaDetailsDto,
 ) -> Result<Vec<EpisodeDto>, IpcError> {
+    log::debug!("cmd episodes: id={}", details.item.id);
     service.episodes(details).await
 }
 
@@ -139,6 +177,12 @@ pub async fn streams(
     translator_id: Option<TranslatorId>,
     episode: Option<EpisodeDto>,
 ) -> Result<Vec<StreamQualityDto>, IpcError> {
+    log::debug!(
+        "cmd streams: id={}, translator_id={:?}, episode={:?}",
+        item.id,
+        translator_id.as_ref().map(|t| t.0),
+        episode.as_ref().map(|e| (e.season_id, e.episode_id)),
+    );
     service
         .streams(item, translator_id.map(|id| id.0), episode)
         .await
@@ -158,6 +202,7 @@ pub async fn player_load(
     quality: StreamQualityDto,
     qualities: Vec<StreamQualityDto>,
 ) -> Result<(), IpcError> {
+    log::info!("cmd player_load: качество={}", quality.label);
     let quality_target = quality.clone().try_into_stream_quality()?;
     let shared = player.shared();
     let window = windows::open_player(&app, Arc::clone(&shared))?;
@@ -178,10 +223,8 @@ pub async fn player_load(
     let windowed = guard
         .as_ref()
         .ok_or_else(|| player_error("плеер не создан"))?;
-    windowed
-        .player()
-        .load_quality(&quality_target)
-        .map_err(player_error)
+    let result = windowed.player().load_quality(&quality_target);
+    result.map_err(player_error)
 }
 
 /// Список качеств, сохранённый последним `player_load` — читает окно `player-controls`, у
@@ -195,18 +238,21 @@ pub fn player_qualities(player: State<'_, PlayerState>) -> Result<Vec<StreamQual
 #[tauri::command]
 #[specta::specta]
 pub fn player_play(player: State<'_, PlayerState>) -> Result<(), IpcError> {
+    log::debug!("cmd player_play");
     with_player(&player, |p| p.play().map_err(player_error))
 }
 
 #[tauri::command]
 #[specta::specta]
 pub fn player_pause(player: State<'_, PlayerState>) -> Result<(), IpcError> {
+    log::debug!("cmd player_pause");
     with_player(&player, |p| p.pause().map_err(player_error))
 }
 
 #[tauri::command]
 #[specta::specta]
 pub fn player_seek(player: State<'_, PlayerState>, seconds: f64) -> Result<(), IpcError> {
+    log::debug!("cmd player_seek: {seconds}");
     with_player(&player, |p| p.seek_to(seconds).map_err(player_error))
 }
 
@@ -218,6 +264,7 @@ pub fn player_set_quality(
     player: State<'_, PlayerState>,
     quality: StreamQualityDto,
 ) -> Result<(), IpcError> {
+    log::info!("cmd player_set_quality: {}", quality.label);
     let quality = quality.try_into_stream_quality()?;
     with_player(&player, |p| {
         p.switch_quality(&quality).map_err(player_error)
@@ -227,6 +274,7 @@ pub fn player_set_quality(
 #[tauri::command]
 #[specta::specta]
 pub fn player_set_volume(player: State<'_, PlayerState>, volume: f64) -> Result<(), IpcError> {
+    log::debug!("cmd player_set_volume: {volume}");
     with_player(&player, |p| p.set_volume(volume).map_err(player_error))
 }
 
@@ -235,6 +283,7 @@ pub fn player_set_volume(player: State<'_, PlayerState>, volume: f64) -> Result<
 #[tauri::command]
 #[specta::specta]
 pub fn player_stop(app: AppHandle) -> Result<(), IpcError> {
+    log::info!("cmd player_stop");
     windows::close_player(&app);
     Ok(())
 }
@@ -261,6 +310,7 @@ where
 /// Создаёт `WindowedPlayer`, привязанный к `NSView` окна `player`, на главном потоке.
 async fn attach_player(window: &Window) -> Result<WindowedPlayer, IpcError> {
     let handle = window.clone();
+    log::info!("плеер: attach рендера к окну");
     on_main(window, move || {
         WindowRenderTarget::new(&handle)
             .and_then(WindowedPlayer::attach)

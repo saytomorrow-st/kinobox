@@ -229,20 +229,41 @@ pub async fn login(
         ("Referer", base.as_str()),
     ];
 
+    // Email — не секрет, но в лог кладём его без хвоста на случай опечатки/всякого.
+    log::debug!("вход на {}", base);
     let reply = client
         .post_form_with_headers(&login_url, &form, &headers)
-        .await?;
-    check_login_reply(&reply.body, &credentials.password)?;
-    let user_id = extract_user_id(&reply.headers)?;
+        .await;
+    let reply = match reply {
+        Ok(reply) => reply,
+        Err(err) => {
+            log::warn!("вход не удался (сеть/HTTP): {err}");
+            return Err(err);
+        }
+    };
+    if let Err(err) = check_login_reply(&reply.body, &credentials.password) {
+        log::info!("вход отклонён: {err}");
+        return Err(err);
+    }
+    let user_id = match extract_user_id(&reply.headers) {
+        Ok(id) => id,
+        Err(err) => {
+            log::warn!("вход: {err}");
+            return Err(err);
+        }
+    };
 
     let home = client.get(&base).await?.text();
     if home.contains(LOGIN_FORM_MARKER) {
-        return Err(KinoError::LoginRejected(
+        let err = KinoError::LoginRejected(
             "вход не засчитан: сайт по-прежнему показывает форму входа".to_string(),
-        ));
+        );
+        log::warn!("вход не засчитан: форма входа осталась на странице");
+        return Err(err);
     }
     let username = extract_username(&home)
         .unwrap_or_else(|| username_from_email(&credentials.email).to_string());
+    log::info!("вход выполнен: user_id={user_id}, username={username}");
     Ok(UserSession { user_id, username })
 }
 
