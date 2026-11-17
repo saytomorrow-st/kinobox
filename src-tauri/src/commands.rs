@@ -4,8 +4,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use kino_ipc::{
-    BootState, EpisodeDto, IpcError, MediaDetailsDto, MediaItemDto, MediaKindDto, MirrorDto,
-    PlayerErrorDto, PlayerProgressDto, StreamQualityDto, TranslatorId, UserDto,
+    BootState, CatalogSortDto, EpisodeDto, IpcError, MediaDetailsDto, MediaItemDto, MediaKindDto,
+    MirrorDto, PlayerErrorDto, PlayerProgressDto, StreamQualityDto, TranslatorId, UserDto,
 };
 use kino_player::{EndReason, PlayerEvent, WindowRenderTarget, WindowedPlayer};
 use tauri::{AppHandle, Emitter, State, Window};
@@ -147,9 +147,11 @@ pub async fn catalog(
     service: State<'_, Service>,
     kind: Option<MediaKindDto>,
     page: u32,
+    sort: Option<CatalogSortDto>,
+    genre: Option<String>,
 ) -> Result<Vec<MediaItemDto>, IpcError> {
-    log::debug!("cmd catalog: kind={kind:?}, page={page}");
-    let items = service.catalog(kind, page).await?;
+    log::debug!("cmd catalog: kind={kind:?}, page={page}, sort={sort:?}, genre={genre:?}");
+    let items = service.catalog(kind, page, sort, genre).await?;
     log::debug!("cmd catalog: ok, {} элементов", items.len());
     Ok(items)
 }

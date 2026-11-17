@@ -8,6 +8,28 @@ use crate::error::Result;
 use crate::media::{Episode, MediaDetails, MediaItem, MediaKind};
 use crate::stream::StreamQuality;
 
+/// Сортировка/фильтр каталога (соответствует `filter=` HDrezka).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CatalogSort {
+    Last,
+    Popular,
+    Soon,
+    Watching,
+}
+
+impl CatalogSort {
+    /// Значение для query-параметра `filter=` (совпадает с serde `snake_case`).
+    pub fn as_query_value(self) -> &'static str {
+        match self {
+            CatalogSort::Last => "last",
+            CatalogSort::Popular => "popular",
+            CatalogSort::Soon => "soon",
+            CatalogSort::Watching => "watching",
+        }
+    }
+}
+
 /// Запрос страницы каталога.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CatalogQuery {
@@ -15,6 +37,10 @@ pub struct CatalogQuery {
     pub kind: Option<MediaKind>,
     /// Нумерация с 1.
     pub page: u32,
+    /// `None` — дефолт сайта (`last`), в URL не попадает.
+    pub sort: Option<CatalogSort>,
+    /// Slug жанра (напр. `"action"`); `None` — без фильтра.
+    pub genre: Option<String>,
 }
 
 /// Источник каталога и потоков.
@@ -27,7 +53,9 @@ pub trait KinoProvider: Send + Sync {
     /// Пустой результат — `Ok(vec![])`, а не `NotFound`. Может вернуть `Parse`.
     fn search(&self, query: &str) -> impl Future<Output = Result<Vec<MediaItem>>> + Send;
 
-    /// Страница каталога; `page` нумеруется с 1. Может вернуть `Parse`.
+    /// Страница каталога; `page` нумеруется с 1. `query.sort` — сортировка
+    /// (`None` — дефолт сайта), `query.genre` — slug жанра (`None` — без фильтра).
+    /// Может вернуть `Parse`.
     fn catalog(&self, query: CatalogQuery) -> impl Future<Output = Result<Vec<MediaItem>>> + Send;
 
     /// Подробная карточка. Может вернуть `NotFound` и `Parse`.
@@ -207,6 +235,8 @@ mod tests {
         let page = CatalogQuery {
             kind: Some(MediaKind::Series),
             page: 1,
+            sort: None,
+            genre: None,
         };
         assert_eq!(
             pollster::block_on(provider.catalog(page)).unwrap(),
@@ -215,6 +245,8 @@ mod tests {
         let other_kind = CatalogQuery {
             kind: Some(MediaKind::Anime),
             page: 1,
+            sort: None,
+            genre: None,
         };
         assert!(pollster::block_on(provider.catalog(other_kind))
             .unwrap()
@@ -222,6 +254,8 @@ mod tests {
         let zero_page = CatalogQuery {
             kind: None,
             page: 0,
+            sort: None,
+            genre: None,
         };
         assert_eq!(
             pollster::block_on(provider.catalog(zero_page)),
@@ -286,10 +320,28 @@ mod tests {
         roundtrip(&CatalogQuery {
             kind: Some(MediaKind::Anime),
             page: 3,
+            sort: Some(CatalogSort::Popular),
+            genre: Some("action".to_string()),
         });
         roundtrip(&CatalogQuery {
             kind: None,
             page: 1,
+            sort: None,
+            genre: None,
         });
+    }
+
+    #[test]
+    fn catalog_sort_roundtrip_and_snake_case() {
+        for (sort, json) in [
+            (CatalogSort::Last, "\"last\""),
+            (CatalogSort::Popular, "\"popular\""),
+            (CatalogSort::Soon, "\"soon\""),
+            (CatalogSort::Watching, "\"watching\""),
+        ] {
+            assert_eq!(serde_json::to_string(&sort).unwrap(), json);
+            roundtrip(&sort);
+            assert_eq!(sort.as_query_value(), json.trim_matches('"'));
+        }
     }
 }

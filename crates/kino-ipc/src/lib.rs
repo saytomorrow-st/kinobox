@@ -12,9 +12,9 @@ mod session;
 mod tests;
 
 pub use dto::{
-    BootState, EpisodeDto, MediaDetailsDto, MediaItemDto, MediaKindDto, MirrorDto, MirrorStateDto,
-    PlayerErrorDto, PlayerProgressDto, SeasonDto, StreamQualityDto, TranslatorDto, TranslatorId,
-    UserDto,
+    BootState, CatalogSortDto, EpisodeDto, MediaDetailsDto, MediaItemDto, MediaKindDto, MirrorDto,
+    MirrorStateDto, PlayerErrorDto, PlayerProgressDto, SeasonDto, StreamQualityDto, TranslatorDto,
+    TranslatorId, UserDto,
 };
 pub use error::{IpcError, IpcErrorKind};
 pub use kino_api::{

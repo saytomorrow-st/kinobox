@@ -153,7 +153,7 @@ async fn main() -> ExitCode {
     }
 
     let root = site_root(mirror);
-    let films_url = match catalog_url(&root, Some(MediaKind::Movie), 1) {
+    let films_url = match catalog_url(&root, Some(MediaKind::Movie), None, 1, None) {
         Ok(url) => url,
         Err(err) => {
             eprintln!("{err}");

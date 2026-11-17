@@ -59,7 +59,13 @@ impl HdrezkaApi {
 
     /// Страница каталога; `page` нумеруется с 1.
     pub async fn catalog(&self, query: CatalogQuery) -> Result<Vec<MediaItem>> {
-        let url = catalog_url(&self.base, query.kind, query.page)?;
+        let url = catalog_url(
+            &self.base,
+            query.kind,
+            query.genre.as_deref(),
+            query.page,
+            query.sort,
+        )?;
         log::debug!("каталог: {}", redact_url(&url));
         let html = self.client.get(&url).await?.text();
         let items = parse_cards(&html, &url)?;
@@ -344,6 +350,8 @@ mod tests {
         let query = CatalogQuery {
             kind: Some(kino_core::MediaKind::Movie),
             page: 2,
+            sort: None,
+            genre: None,
         };
         let items = api.catalog(query).await.expect("каталог");
         assert_eq!(items.len(), 1);
@@ -404,7 +412,9 @@ mod tests {
         assert_eq!(
             api.catalog(CatalogQuery {
                 kind: None,
-                page: 1
+                page: 1,
+                sort: None,
+                genre: None,
             })
             .await,
             Err(kino_core::KinoError::AuthRequired)
