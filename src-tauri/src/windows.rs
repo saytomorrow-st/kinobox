@@ -111,6 +111,11 @@ pub fn open_player(
 
     log::debug!("окно {PLAYER}: show");
     window.show().map_err(internal)?;
+    // Без явного `set_focus()` окно `player` (голое, без веб-контента) появляется, но не
+    // становится key-окном — клики по нему не доходят (#027, баг #4). `open()` и
+    // `open_player_controls()` делают то же самое, здесь вызов был пропущен.
+    log::debug!("окно {PLAYER}: focus");
+    window.set_focus().map_err(internal)?;
     open_player_controls(app)?;
     Ok(window)
 }

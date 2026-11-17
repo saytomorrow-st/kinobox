@@ -208,7 +208,7 @@ pub async fn player_load(
     let window = windows::open_player(&app, Arc::clone(&shared))?;
 
     if shared.lock().unwrap().is_none() {
-        let attached = attach_player(&window).await?;
+        let attached = attach_player(&window, Arc::clone(&shared)).await?;
         attached
             .player()
             .observe_playback_properties()
@@ -307,16 +307,60 @@ where
         .map_err(|_| player_error("главный поток не ответил"))?
 }
 
-/// Создаёт `WindowedPlayer`, привязанный к `NSView` окна `player`, на главном потоке.
-async fn attach_player(window: &Window) -> Result<WindowedPlayer, IpcError> {
+/// Создаёт `WindowedPlayer`, привязанный к `NSView` окна `player`, на главном потоке,
+/// и подключает redraw-цикл (#027): `set_update_callback` заводит обратный вызов
+/// libmpv «кадр готов», который маршалит `render` обратно на главный поток.
+async fn attach_player(
+    window: &Window,
+    shared: Arc<Mutex<Option<WindowedPlayer>>>,
+) -> Result<WindowedPlayer, IpcError> {
     let handle = window.clone();
     log::info!("плеер: attach рендера к окну");
-    on_main(window, move || {
+    let mut attached = on_main(window, move || {
         WindowRenderTarget::new(&handle)
             .and_then(WindowedPlayer::attach)
             .map_err(player_error)
     })
-    .await
+    .await?;
+
+    // Callback вызывается из потока libmpv (НЕ главного). Он владеет клонами `Window` и
+    // `shared`, поэтому `'static`; сам `render`/`view_size` трогают AppKit/GL и уходят на
+    // главный поток внутри `schedule_render` через `run_on_main_thread`.
+    let cb_window = window.clone();
+    let cb_shared = Arc::clone(&shared);
+    attached
+        .render_context_mut()
+        .set_update_callback(move || schedule_render(&cb_window, &cb_shared));
+
+    Ok(attached)
+}
+
+/// Планирует отрисовку одного кадра на главном потоке. Вызывается из update-callback'а
+/// libmpv (фоновый поток) — сам рендер переносится в `run_on_main_thread`, как `attach` и
+/// `view_size` выше: AppKit/GL-вызовы разрешены только с главного потока.
+fn schedule_render(window: &Window, shared: &Arc<Mutex<Option<WindowedPlayer>>>) {
+    let window = window.clone();
+    let shared = Arc::clone(shared);
+    if window
+        .run_on_main_thread(move || {
+            let guard = shared.lock().unwrap();
+            let Some(windowed) = guard.as_ref() else {
+                return;
+            };
+            let (w, h) = windowed.render_context().view_size();
+            let scale = window.scale_factor().unwrap_or(1.0);
+            let (pw, ph) = ((w * scale) as i32, (h * scale) as i32);
+            if pw > 0 && ph > 0 {
+                if let Err(err) = windowed.render_context().render(pw, ph) {
+                    log::error!("плеер: render({pw}x{ph}) не удался: {err}");
+                }
+            }
+        })
+        .is_err()
+    {
+        // Главный поток уже не отвечает (окно закрывается) — кадр пропускаем без шума.
+        log::debug!("плеер: пропущен редрав — главный поток недоступен");
+    }
 }
 
 fn with_player<R>(

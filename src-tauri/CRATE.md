@@ -68,6 +68,13 @@ pub type Service = AppService<KeychainSecretStore, MemoryMirrorStore>;
 цена за то, что `WindowedPlayer` (самоссылающаяся структура) нельзя поделить на `Arc`-части. Поток
 завершается сам, когда `shared` становится `None`.
 
+Redraw-цикл плеера (#027): после `attach` вызывается `render_context_mut().set_update_callback(...)`
+с колбэком, который `libmpv` зовёт из своего потока, когда готов новый видеокадр. Колбэк не трогает
+AppKit/GL напрямую, а маршалит рендер на главный поток через `run_on_main_thread` (функция
+`schedule_render`): там берётся `view_size()` (размер `NSView` в точках), умножается на
+`window.scale_factor()` для перевода в пиксели фреймбуфера, и вызывается `render(width_px, height_px)`.
+Оба вызова (`view_size`/`render`) идут только с главного потока — того же инварианта, что `attach`.
+
 ## Окна и их жизненный цикл
 
 Окнами управляет Rust (`src/windows.rs`), не фронтенд — это гарантирует, что открытых окон не бывает
@@ -95,7 +102,8 @@ pub type Service = AppService<KeychainSecretStore, MemoryMirrorStore>;
   первого показа.
 - `main`: 1280×800, минимум 960×600, `create: false` (не создаётся автоматически при старте —
   появляется только через `windows::enter_main`).
-- `player`: 1280×720, без системных украшений (`decorations: false`), `create: false` — окно **без
+- `player`: 1280×720, без системных украшений (`decorations: false`), `center: true` (центрируется
+  по экрану при показе, а не падает в случайное место — #027, баг #4), `create: false` — окно **без
   веб-контента**: в его `NSView` встраивается рендер `libmpv`. Создаётся через
   `tauri::window::WindowBuilder::from_config` (unstable API), а не `WebviewWindowBuilder`, поэтому из
   `Manager` его возвращает `get_window`, а `get_webview_window` — `None`.
