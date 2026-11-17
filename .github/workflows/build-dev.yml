@@ -303,7 +303,7 @@ jobs:
           set -euo pipefail
           brew tap homebrew/core
           FFMPEG_FORMULA="$(brew --repository homebrew/core)/Formula/f/ffmpeg.rb"
-          perl -pi -e 's/(--enable-openssl)/$1\n      --disable-avfoundation/' "$FFMPEG_FORMULA"
+          perl -pi -e 's/(--enable-openssl)/$1\n      --disable-avfoundation\n      --extra-cflags=-mmacosx-version-min=13.0\n      --extra-ldflags=-mmacosx-version-min=13.0/' "$FFMPEG_FORMULA"
           grep -q 'disable-avfoundation' "$FFMPEG_FORMULA" || {
             echo "ERROR: patch did not apply to ffmpeg.rb (upstream formula changed?)" >&2
             exit 1
@@ -474,7 +474,7 @@ jobs:
           set -euo pipefail
           brew tap homebrew/core
           FFMPEG_FORMULA="$(brew --repository homebrew/core)/Formula/f/ffmpeg.rb"
-          perl -pi -e 's/(--enable-openssl)/$1\n      --disable-avfoundation/' "$FFMPEG_FORMULA"
+          perl -pi -e 's/(--enable-openssl)/$1\n      --disable-avfoundation\n      --extra-cflags=-mmacosx-version-min=13.0\n      --extra-ldflags=-mmacosx-version-min=13.0/' "$FFMPEG_FORMULA"
           grep -q 'disable-avfoundation' "$FFMPEG_FORMULA" || {
             echo "ERROR: patch did not apply to ffmpeg.rb (upstream formula changed?)" >&2
             exit 1
