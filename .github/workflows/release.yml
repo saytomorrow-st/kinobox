@@ -25,20 +25,21 @@ jobs:
       # Бутылка mpv для x86_64 собрана Homebrew со Swift-кодом macOS-backend
       # (Touch Bar / media-key интеграция), который требует символ AppKit,
       # появившийся только в macOS 14 — краш при старте на более старых ОС
-      # (баг #11). Патчим формулу локально (без тапа homebrew-core — он не
-      # клонится по умолчанию в API-режиме Homebrew) и собираем mpv из
-      # исходников с отключённым Swift; зависимости остаются бутылками.
+      # (баг #11). Патчим формулу прямо в чекауте тапа homebrew-core (install
+      # по пути Homebrew отклоняет: "requires formulae to be in a tap") и
+      # собираем mpv из исходников с отключённым Swift; зависимости остаются
+      # бутылками.
       - name: Install mpv (x86_64, built from source, Swift disabled — bug #11)
         run: |
           set -euo pipefail
-          curl -fsSL -o /tmp/mpv.rb \
-            https://raw.githubusercontent.com/Homebrew/homebrew-core/HEAD/Formula/m/mpv.rb
-          perl -pi -e 's/(-Dbuild-date=false)/$1\n    -Dswift-build=disabled/' /tmp/mpv.rb
-          grep -q 'Dswift-build=disabled' /tmp/mpv.rb || {
+          brew tap homebrew/core
+          MPV_FORMULA="$(brew --repository homebrew/core)/Formula/m/mpv.rb"
+          perl -pi -e 's/(-Dbuild-date=false)/$1\n    -Dswift-build=disabled/' "$MPV_FORMULA"
+          grep -q 'Dswift-build=disabled' "$MPV_FORMULA" || {
             echo "ERROR: patch did not apply to mpv.rb (upstream formula changed?)" >&2
             exit 1
           }
-          brew install --build-from-source /tmp/mpv.rb
+          brew install --build-from-source mpv
 
       - name: Show bottle architectures (diagnostics)
         run: lipo -info "$(brew --prefix mpv)/lib/libmpv.2.dylib"
