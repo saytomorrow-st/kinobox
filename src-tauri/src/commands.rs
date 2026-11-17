@@ -339,8 +339,8 @@ async fn attach_player(
 /// libmpv (фоновый поток) — сам рендер переносится в `run_on_main_thread`, как `attach` и
 /// `view_size` выше: AppKit/GL-вызовы разрешены только с главного потока.
 fn schedule_render(window: &Window, shared: &Arc<Mutex<Option<WindowedPlayer>>>) {
-    let window = window.clone();
     let shared = Arc::clone(shared);
+    let window_for_cb = window.clone();
     if window
         .run_on_main_thread(move || {
             let guard = shared.lock().unwrap();
@@ -348,7 +348,7 @@ fn schedule_render(window: &Window, shared: &Arc<Mutex<Option<WindowedPlayer>>>)
                 return;
             };
             let (w, h) = windowed.render_context().view_size();
-            let scale = window.scale_factor().unwrap_or(1.0);
+            let scale = window_for_cb.scale_factor().unwrap_or(1.0);
             let (pw, ph) = ((w * scale) as i32, (h * scale) as i32);
             if pw > 0 && ph > 0 {
                 if let Err(err) = windowed.render_context().render(pw, ph) {
