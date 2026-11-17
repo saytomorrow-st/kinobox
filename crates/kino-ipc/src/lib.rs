@@ -13,7 +13,8 @@ mod tests;
 
 pub use dto::{
     BootState, EpisodeDto, MediaDetailsDto, MediaItemDto, MediaKindDto, MirrorDto, MirrorStateDto,
-    PlayerProgressDto, SeasonDto, StreamQualityDto, TranslatorDto, TranslatorId, UserDto,
+    PlayerErrorDto, PlayerProgressDto, SeasonDto, StreamQualityDto, TranslatorDto, TranslatorId,
+    UserDto,
 };
 pub use error::{IpcError, IpcErrorKind};
 pub use kino_api::{

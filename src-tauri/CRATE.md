@@ -63,7 +63,10 @@ pub type Service = AppService<KeychainSecretStore, MemoryMirrorStore>;
 
 Фоновый поток прогресса (`start_progress_thread`) опрашивает события mpv (`next_event(0.1)`) и эмиттит снимок
 `PlayerProgressDto` в окно `player-controls` событием `player-progress` (сырой `tauri::Emitter::emit_to`,
-без tauri-specta — событие не входит в сигнатуры команд). Поток держит мьютекс на время `next_event`
+без tauri-specta — событие не входит в сигнатуры команд). Асинхронный провал mpv (`PlayerEvent::EndOfFile(Error)`
+или `PlayerEvent::Error`) тот же поток доносит до UI событием `player-error` (`PlayerErrorDto` с
+человекочитаемым русским `message` без технических деталей mpv); нормальный `EndOfFile(Eof)` ошибкой не
+считается (#029). Поток держит мьютекс на время `next_event`
 (≤ ~0.1 с), за это время команды `player_play`/`player_pause` могут кратко заблокироваться — осознанная
 цена за то, что `WindowedPlayer` (самоссылающаяся структура) нельзя поделить на `Arc`-части. Поток
 завершается сам, когда `shared` становится `None`.

@@ -1,7 +1,7 @@
 import { listen } from "@tauri-apps/api/event";
 import { create } from "zustand";
 
-import type { Api, PlayerProgressDto, StreamQualityDto } from "./api";
+import type { Api, PlayerErrorDto, PlayerProgressDto, StreamQualityDto } from "./api";
 
 const ERROR_QUALITIES = "Не удалось получить список качеств.";
 const ERROR_ACTION = "Не удалось выполнить действие плеера. Попробуйте ещё раз.";
@@ -32,6 +32,7 @@ export interface PlayerControlsState {
 // где стор подписывается на событие, а не только вызывает команды.
 export function createPlayerStore(api: Api) {
   let unlisten: (() => void) | null = null;
+  let unlistenError: (() => void) | null = null;
   let initInFlight: Promise<void> | null = null;
 
   return create<PlayerControlsState>()((_set, get) => {
@@ -71,6 +72,12 @@ export function createPlayerStore(api: Api) {
               });
             });
           }
+
+          if (!unlistenError) {
+            unlistenError = await listen<PlayerErrorDto>("player-error", (event) => {
+              set({ error: event.payload.message });
+            });
+          }
         })();
         return initInFlight;
       },
@@ -78,6 +85,8 @@ export function createPlayerStore(api: Api) {
       dispose: () => {
         unlisten?.();
         unlisten = null;
+        unlistenError?.();
+        unlistenError = null;
         initInFlight = null;
       },
 
