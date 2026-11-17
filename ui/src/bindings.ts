@@ -18,7 +18,7 @@ export const commands = {
 	addMirror: (url: string, options?: InvokeOptions) => typedError<MirrorDto, IpcError>(__TAURI_INVOKE("add_mirror", { url }, options)),
 	selectMirror: (url: string, options?: InvokeOptions) => typedError<MirrorDto, IpcError>(__TAURI_INVOKE("select_mirror", { url }, options)),
 	quit: (options?: InvokeOptions) => __TAURI_INVOKE<void>("quit", undefined, options),
-	catalog: (kind: MediaKindDto | null, page: number, options?: InvokeOptions) => typedError<MediaItemDto[], IpcError>(__TAURI_INVOKE("catalog", { kind, page }, options)),
+	catalog: (kind: MediaKindDto | null, page: number, sort: CatalogSortDto | null, genre: string | null, options?: InvokeOptions) => typedError<MediaItemDto[], IpcError>(__TAURI_INVOKE("catalog", { kind, page, sort, genre }, options)),
 	search: (query: string, options?: InvokeOptions) => typedError<MediaItemDto[], IpcError>(__TAURI_INVOKE("search", { query }, options)),
 	details: (item: MediaItemDto, options?: InvokeOptions) => typedError<MediaDetailsDto, IpcError>(__TAURI_INVOKE("details", { item }, options)),
 	episodes: (details: MediaDetailsDto, options?: InvokeOptions) => typedError<EpisodeDto[], IpcError>(__TAURI_INVOKE("episodes", { details }, options)),
@@ -65,6 +65,9 @@ export type BootState =
 { state: "needsLogin"; email: string | null } | { state: "signedIn"; user: UserDto } | 
 /**  Зеркала или сеть недоступны. Сохранённые данные не тронуты. */
 { state: "unavailable"; message: string };
+
+/**  Сортировка/фильтр каталога (соответствует `filter=` HDrezka). */
+export type CatalogSortDto = "last" | "popular" | "soon" | "watching";
 
 /**  Одна серия сериала. */
 export type EpisodeDto = {
