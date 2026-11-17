@@ -11,6 +11,7 @@ use kino_core::{
 use crate::api::HdrezkaApi;
 use crate::cdn::extract_player_data;
 use crate::deobfuscate::deobfuscate;
+use crate::parse::extract_favs;
 
 impl KinoProvider for HdrezkaApi {
     async fn search(&self, query: &str) -> Result<Vec<MediaItem>> {
@@ -30,7 +31,14 @@ impl KinoProvider for HdrezkaApi {
             return Ok(Vec::new());
         }
         let translator_id = resolve_translator_id(details, None)?;
-        let map = self.episodes_list(&details.item, translator_id).await?;
+        let favs = details
+            .raw_html
+            .as_deref()
+            .and_then(extract_favs)
+            .unwrap_or_default();
+        let map = self
+            .episodes_list(&details.item, translator_id, &favs)
+            .await?;
         let mut all: Vec<Episode> = map.into_values().flatten().collect();
         all.sort_by_key(|episode| (episode.season_id, episode.episode_id));
         Ok(all)
@@ -48,9 +56,15 @@ impl KinoProvider for HdrezkaApi {
                 let post_id = u32::try_from(details.item.id).map_err(|_| {
                     KinoError::Parse("id произведения не помещается в u32".to_string())
                 })?;
+                let favs = details
+                    .raw_html
+                    .as_deref()
+                    .and_then(extract_favs)
+                    .unwrap_or_default();
                 self.stream_url(
                     post_id,
                     translator_id,
+                    &favs,
                     Some(episode.season_id),
                     Some(episode.episode_id),
                 )

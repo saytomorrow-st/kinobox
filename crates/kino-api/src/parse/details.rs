@@ -15,6 +15,7 @@ use super::{
 };
 
 const POST_ID: &str = "input#post_id";
+const CTRL_FAVS: &str = "input#ctrl_favs";
 const TITLE: &str = ".b-post__title h1";
 const ORIG_TITLE: &str = ".b-post__origtitle";
 const DESCRIPTION: &str = ".b-post__description_text";
@@ -91,6 +92,19 @@ pub fn parse_details(html: &str, page_url: &Url) -> Result<MediaDetails> {
         seasons,
         raw_html: Some(html.to_string()),
     })
+}
+
+/// Значение скрытого инпута `<input id="ctrl_favs" value="…">` со страницы
+/// произведения. Это UUID-подобный токен, который HDrezka ждёт в форме
+/// `get_cdn_series` (поля `favs`) для любого action. Инпута может не быть —
+/// тогда `None` (пустая строка в форме), как и в эталонной либе.
+pub(crate) fn extract_favs(html: &str) -> Option<String> {
+    let document = Html::parse_document(html);
+    document
+        .select(&selector(CTRL_FAVS).ok()?)
+        .next()
+        .and_then(|input| input.value().attr("value"))
+        .map(|value| value.trim().to_string())
 }
 
 /// Текст первого подходящего элемента, без пробелов по краям; пустой текст — `None`.
@@ -352,5 +366,28 @@ mod tests {
                 name: String::new()
             }]
         );
+    }
+
+    #[test]
+    fn extracts_favs_from_ctrl_favs_input() {
+        let html = r#"<html><body>
+            <input type="hidden" id="ctrl_favs" value="123e4567-e89b-12d3-a456-426614174000" />
+        </body></html>"#;
+        assert_eq!(
+            extract_favs(html).as_deref(),
+            Some("123e4567-e89b-12d3-a456-426614174000")
+        );
+    }
+
+    #[test]
+    fn missing_favs_is_none() {
+        let html = r#"<html><body><input id="post_id" value="1"></body></html>"#;
+        assert_eq!(extract_favs(html), None);
+    }
+
+    #[test]
+    fn empty_favs_value_is_none() {
+        let html = r#"<html><body><input id="ctrl_favs" value=""></body></html>"#;
+        assert_eq!(extract_favs(html).as_deref(), Some(""));
     }
 }

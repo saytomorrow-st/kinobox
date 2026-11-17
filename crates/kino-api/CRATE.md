@@ -349,9 +349,9 @@ impl HdrezkaApi {
     pub async fn catalog(&self, query: CatalogQuery) -> Result<Vec<MediaItem>>;
     pub async fn details(&self, item: &MediaItem) -> Result<MediaDetails>;
     pub async fn details_at(&self, page_url: &Url) -> Result<MediaDetails>; // детали по адресу
-    pub async fn episodes_list(&self, item: &MediaItem, translator_id: u32)
+    pub async fn episodes_list(&self, item: &MediaItem, translator_id: u32, favs: &str)
         -> Result<HashMap<u32, Vec<Episode>>>;   // action=get_episodes
-    pub async fn stream_url(&self, post_id: u32, translator_id: u32,
+    pub async fn stream_url(&self, post_id: u32, translator_id: u32, favs: &str,
         season: Option<u32>, episode: Option<u32>)
         -> Result<Vec<StreamQuality>>;           // action=get_stream, после деобфускации
 }
@@ -437,10 +437,15 @@ pub fn parse_episodes_html(html: &str, season_id: u32) -> Result<Vec<Episode>>;
 
 #### AJAX `/ajax/get_cdn_series/`
 
-`POST /ajax/get_cdn_series/` с полями `id`, `translator_id`, `action`. Успех:
-`{"success":true,…}`, ошибка: `{"success":false,"message":"…"}`. Статус 200 с
-`success:false` — это не сетевая ошибка, а `KinoError::Parse` (текст из `message`).
-Нет `success` вообще или неожиданная структура — тоже `Parse`.
+`POST /ajax/get_cdn_series/` с полями `id`, `translator_id`, `favs`, `action`.
+`favs` — значение скрытого инпута `#ctrl_favs` со страницы произведения
+(UUID-подобный токен; эталонные библиотеки `kristal374/hdrezka-api` и
+`ndenissov/HDRezka` шлют его для любого action), извлекается `parse::extract_favs`
+из `MediaDetails::raw_html` и пробрасывается `provider_impl` в обе функции; пустая
+строка, если инпута на странице нет. Успех: `{"success":true,…}`, ошибка:
+`{"success":false,"message":"…"}`. Статус 200 с `success:false` — это не сетевая
+ошибка, а `KinoError::Parse` (текст из `message`). Нет `success` вообще или
+неожиданная структура — тоже `Parse`.
 
 - `action=get_episodes` → `{"success":true,"episodes":{"1":"<ul><li>1 серия</li>…</ul>",…}}`.
   `episodes_list` разбирает строку каждого сезона через `parse_episodes_html` и

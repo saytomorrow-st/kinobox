@@ -82,12 +82,16 @@ impl HdrezkaApi {
     /// Серии всех сезонов для перевода `translator_id` через
     /// `POST /ajax/get_cdn_series/` (`action=get_episodes`).
     ///
+    /// `favs` — значение скрытого инпута `#ctrl_favs` со страницы произведения
+    /// (см. `parse::extract_favs`); пустая строка, если инпута нет.
+    ///
     /// Ответ `{"success":true,"episodes":{сезон: "<ul>…</ul>"}}`; при
     /// `success:false` или иной структуре — `KinoError::Parse`.
     pub async fn episodes_list(
         &self,
         item: &MediaItem,
         translator_id: u32,
+        favs: &str,
     ) -> Result<HashMap<u32, Vec<Episode>>> {
         let url = self.cdn_series_url()?;
         let id = item.id.to_string();
@@ -95,9 +99,13 @@ impl HdrezkaApi {
         let form = [
             ("id", id.as_str()),
             ("translator_id", translator.as_str()),
+            ("favs", favs),
             ("action", "get_episodes"),
         ];
-        log::debug!("серии: id={id} translator_id={translator}");
+        log::debug!(
+            "серии: id={id} translator_id={translator} favs={}",
+            redact_favs(favs)
+        );
         let reply = self.client.post_form(&url, &form).await?;
         let text = reply.text();
         let value = match parse_cdn_json(&text, "get_episodes") {
@@ -134,6 +142,9 @@ impl HdrezkaApi {
     /// Потоки для перевода `translator_id` (и, для сериала, `season`/`episode`)
     /// через `POST /ajax/get_cdn_series/` (`action=get_stream`).
     ///
+    /// `favs` — значение скрытого инпута `#ctrl_favs` со страницы произведения
+    /// (см. `parse::extract_favs`); пустая строка, если инпута нет.
+    ///
     /// Ответ `{"success":true,"url":"#h…"}` либо
     /// `{"success":false,"message":"…"}`. `url` проходит через деобфускацию.
     /// Поля `season`/`episode` добавляются в форму, только если заданы.
@@ -141,6 +152,7 @@ impl HdrezkaApi {
         &self,
         post_id: u32,
         translator_id: u32,
+        favs: &str,
         season: Option<u32>,
         episode: Option<u32>,
     ) -> Result<Vec<StreamQuality>> {
@@ -153,6 +165,7 @@ impl HdrezkaApi {
         let mut form: Vec<(&str, &str)> = vec![
             ("id", id.as_str()),
             ("translator_id", translator.as_str()),
+            ("favs", favs),
             ("action", "get_stream"),
         ];
         if let Some(season) = season_owned.as_deref() {
@@ -228,6 +241,15 @@ fn redact_url(url: &Url) -> String {
     bare.set_query(None);
     bare.set_fragment(None);
     bare.to_string()
+}
+
+/// Значение `favs` для лога: сам UUID-подобный токен не печатаем.
+fn redact_favs(favs: &str) -> String {
+    if favs.is_empty() {
+        "(пусто)".to_string()
+    } else {
+        "(есть)".to_string()
+    }
 }
 
 /// Фрагмент тела ответа для диагностики сбоя парсинга. Обрезается до разумной длины
@@ -408,14 +430,16 @@ mod tests {
         let body = r#"{"success":true,"episodes":{"1":"<ul><li>1 серия</li><li>2 серия</li></ul>","2":"<ul><li>1 серия</li></ul>"}}"#;
         Mock::given(method("POST"))
             .and(path("/ajax/get_cdn_series/"))
-            .and(body_string("id=7&translator_id=111&action=get_episodes"))
+            .and(body_string(
+                "id=7&translator_id=111&favs=abc123&action=get_episodes",
+            ))
             .respond_with(ResponseTemplate::new(200).set_body_string(body))
             .expect(1)
             .mount(&server)
             .await;
         let api = HdrezkaApi::new(client(), Url::parse(&server.uri()).expect("url"));
         let map = api
-            .episodes_list(&sample_item(7), 111)
+            .episodes_list(&sample_item(7), 111, "abc123")
             .await
             .expect("серии");
         assert_eq!(map.len(), 2);
@@ -438,7 +462,7 @@ mod tests {
             .await;
         let api = HdrezkaApi::new(client(), Url::parse(&server.uri()).expect("url"));
         let err = api
-            .episodes_list(&sample_item(7), 111)
+            .episodes_list(&sample_item(7), 111, "")
             .await
             .expect_err("ошибка");
         assert!(matches!(err, kino_core::KinoError::Parse(_)), "{err:?}");
@@ -457,7 +481,7 @@ mod tests {
         Mock::given(method("POST"))
             .and(path("/ajax/get_cdn_series/"))
             .and(body_string(
-                "id=85038&translator_id=111&action=get_stream&season=1&episode=2",
+                "id=85038&translator_id=111&favs=abc123&action=get_stream&season=1&episode=2",
             ))
             .respond_with(ResponseTemplate::new(200).set_body_string(body))
             .expect(1)
@@ -465,7 +489,7 @@ mod tests {
             .await;
         let api = HdrezkaApi::new(client(), Url::parse(&server.uri()).expect("url"));
         let qualities = api
-            .stream_url(85038, 111, Some(1), Some(2))
+            .stream_url(85038, 111, "abc123", Some(1), Some(2))
             .await
             .expect("потоки");
         assert_eq!(qualities.len(), 1);
@@ -485,7 +509,7 @@ mod tests {
             .await;
         let api = HdrezkaApi::new(client(), Url::parse(&server.uri()).expect("url"));
         let err = api
-            .stream_url(85038, 111, None, None)
+            .stream_url(85038, 111, "", None, None)
             .await
             .expect_err("ошибка");
         assert!(matches!(err, kino_core::KinoError::Parse(_)), "{err:?}");
@@ -498,14 +522,16 @@ mod tests {
         let body = r#"{"success":true,"url":"[360p]https://cdn.example.com/360.mp4"}"#;
         Mock::given(method("POST"))
             .and(path("/ajax/get_cdn_series/"))
-            .and(body_string("id=85038&translator_id=111&action=get_stream"))
+            .and(body_string(
+                "id=85038&translator_id=111&favs=&action=get_stream",
+            ))
             .respond_with(ResponseTemplate::new(200).set_body_string(body))
             .expect(1)
             .mount(&server)
             .await;
         let api = HdrezkaApi::new(client(), Url::parse(&server.uri()).expect("url"));
         let qualities = api
-            .stream_url(85038, 111, None, None)
+            .stream_url(85038, 111, "", None, None)
             .await
             .expect("потоки");
         assert_eq!(qualities.len(), 1);
