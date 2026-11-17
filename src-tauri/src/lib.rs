@@ -30,6 +30,8 @@ fn bindings_builder() -> Builder<Wry> {
             commands::catalog,
             commands::search,
             commands::details,
+            commands::collections,
+            commands::collection_items,
             commands::episodes,
             commands::streams,
             commands::player_load,

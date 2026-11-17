@@ -11,8 +11,9 @@ use wiremock::matchers::{body_string, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use crate::{
-    AppService, BootState, CatalogSortDto, EpisodeDto, IpcError, IpcErrorKind, MediaDetailsDto,
-    MediaItemDto, MediaKindDto, MirrorDto, MirrorStateDto, StreamQualityDto, UserDto,
+    AppService, BootState, CatalogSortDto, CollectionDto, EpisodeDto, IpcError, IpcErrorKind,
+    MediaDetailsDto, MediaItemDto, MediaKindDto, MirrorDto, MirrorStateDto, StreamQualityDto,
+    UserDto,
 };
 
 const PASSWORD: &str = "Zq9!pw-secret";
@@ -668,6 +669,74 @@ async fn catalog_reports_no_mirrors() {
         .expect_err("ожидали ошибку");
 
     assert_eq!(err.kind, IpcErrorKind::NoMirrors);
+}
+
+fn collection_card() -> String {
+    r#"<html><body>
+        <div class="b-collections__newest">
+            <div class="b-content__collections_item">
+                <a class="b-content__collections_item-link" href="/collections/5-oskar-2026/">Оскар 2026</a>
+                <a class="b-content__collections_item-cover" href="/collections/5-oskar-2026/"><img src="/collections/5.jpg"></a>
+                <span class="b-content__collections_item-count">24 фильма</span>
+            </div>
+        </div>
+    </body></html>"#
+        .to_string()
+}
+
+fn collection_dto(server: &MockServer) -> CollectionDto {
+    CollectionDto {
+        id: 5,
+        title: "Оскар 2026".to_string(),
+        url: format!("{}/collections/5-oskar-2026/", server.uri()),
+        poster_url: Some(format!("{}/collections/5.jpg", server.uri())),
+        items_count: Some(24),
+    }
+}
+
+#[tokio::test]
+async fn collections_delegates_to_provider_on_active_mirror() {
+    let server = answering(ResponseTemplate::new(200).set_body_string(collection_card())).await;
+    let service = service(&[&server]).await;
+    service.pool.store().set_active(base(&server)).await;
+
+    let collections = service.collections().await.expect("коллекции");
+
+    assert_eq!(collections.len(), 1);
+    assert_eq!(collections[0].id, 5);
+    assert_eq!(collections[0].title, "Оскар 2026");
+    let requested = server
+        .received_requests()
+        .await
+        .expect("запросы")
+        .into_iter()
+        .next()
+        .expect("хотя бы один запрос");
+    assert_eq!(requested.url.path(), "/");
+}
+
+#[tokio::test]
+async fn collection_items_delegates_to_provider_on_active_mirror() {
+    let server =
+        answering(ResponseTemplate::new(200).set_body_string(card(9, "/films/9.html"))).await;
+    let service = service(&[&server]).await;
+    service.pool.store().set_active(base(&server)).await;
+
+    let items = service
+        .collection_items(collection_dto(&server), 2)
+        .await
+        .expect("постеры коллекции");
+
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0].id, 9);
+    let requested = server
+        .received_requests()
+        .await
+        .expect("запросы")
+        .into_iter()
+        .next()
+        .expect("хотя бы один запрос");
+    assert_eq!(requested.url.path(), "/collections/5-oskar-2026/page/2/");
 }
 
 #[tokio::test]

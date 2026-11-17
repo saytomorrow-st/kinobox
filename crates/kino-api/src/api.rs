@@ -2,13 +2,17 @@
 
 use std::collections::HashMap;
 
-use kino_core::{CatalogQuery, Episode, KinoError, MediaDetails, MediaItem, Result, StreamQuality};
+use kino_core::{
+    CatalogQuery, Collection, Episode, KinoError, MediaDetails, MediaItem, Result, StreamQuality,
+};
 use url::Url;
 
 use crate::cdn::parse_episodes_html;
 use crate::client::HttpClient;
 use crate::deobfuscate::deobfuscate;
-use crate::parse::{catalog_url, parse_cards, parse_details, search_url};
+use crate::parse::{
+    catalog_url, collection_url, parse_cards, parse_collections, parse_details, search_url,
+};
 
 /// Путь главного AJAX-эндпоинта HDrezka (`get_movie`/`get_stream`/`get_episodes`).
 const CDN_SERIES_PATH: &str = "/ajax/get_cdn_series/";
@@ -73,11 +77,36 @@ impl HdrezkaApi {
         Ok(items)
     }
 
+    /// Список курируемых коллекций с главной страницы (`{base}/`).
+    pub async fn collections(&self) -> Result<Vec<Collection>> {
+        let url = self.base.clone();
+        log::debug!("коллекции: {}", redact_url(&url));
+        let html = self.client.get(&url).await?.text();
+        let collections = parse_collections(&html, &url)?;
+        log::info!("коллекции: {} штук", collections.len());
+        Ok(collections)
+    }
+
+    /// Постеры конкретной коллекции, с пагинацией (`page` нумеруется с 1).
+    /// Карточки внутри коллекции рендерятся в том же контейнере, что и каталог,
+    /// поэтому переиспользуется `parse_cards`.
+    pub async fn collection_items(
+        &self,
+        collection: &Collection,
+        page: u32,
+    ) -> Result<Vec<MediaItem>> {
+        let url = collection_url(collection, page)?;
+        log::debug!("коллекция {}: {}", collection.id, redact_url(&url));
+        let html = self.client.get(&url).await?.text();
+        let items = parse_cards(&html, &url)?;
+        log::info!("коллекция {}: {} элементов", collection.id, items.len());
+        Ok(items)
+    }
+
     /// Подробная карточка по элементу каталога.
     pub async fn details(&self, item: &MediaItem) -> Result<MediaDetails> {
         self.details_at(&item.page_url).await
     }
-
     /// Подробная карточка по адресу страницы.
     pub async fn details_at(&self, page_url: &Url) -> Result<MediaDetails> {
         log::debug!("детали: {}", redact_url(page_url));
@@ -354,6 +383,60 @@ mod tests {
             genre: None,
         };
         let items = api.catalog(query).await.expect("каталог");
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].id, 9);
+    }
+
+    fn collection_card() -> String {
+        r#"<html><body>
+            <div class="b-collections__newest">
+                <div class="b-content__collections_item">
+                    <a class="b-content__collections_item-link" href="/collections/5-oskar-2026/">Оскар 2026</a>
+                    <a class="b-content__collections_item-cover" href="/collections/5-oskar-2026/"><img src="/collections/5.jpg"></a>
+                    <span class="b-content__collections_item-count">24 фильма</span>
+                </div>
+            </div>
+        </body></html>"#
+            .to_string()
+    }
+
+    #[tokio::test]
+    async fn collections_fetches_home_page() {
+        let server = server().await;
+        Mock::given(method("GET"))
+            .and(path("/"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(collection_card()))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let api = HdrezkaApi::new(client(), Url::parse(&server.uri()).expect("url"));
+        let collections = api.collections().await.expect("коллекции");
+        assert_eq!(collections.len(), 1);
+        assert_eq!(collections[0].id, 5);
+        assert_eq!(collections[0].title, "Оскар 2026");
+    }
+
+    #[tokio::test]
+    async fn collection_items_fetches_collection_page() {
+        let server = server().await;
+        Mock::given(method("GET"))
+            .and(path("/collections/5-oskar-2026/page/2/"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(card(9, "/films/9.html")))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let api = HdrezkaApi::new(client(), Url::parse(&server.uri()).expect("url"));
+        let collection = Collection {
+            id: 5,
+            title: "Оскар 2026".to_string(),
+            url: Url::parse(&format!("{}/collections/5-oskar-2026/", server.uri())).unwrap(),
+            poster_url: None,
+            items_count: None,
+        };
+        let items = api
+            .collection_items(&collection, 2)
+            .await
+            .expect("постеры коллекции");
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].id, 9);
     }

@@ -18,7 +18,10 @@ pub use mirrors::{
     MemoryMirrorStore, MirrorConfig, MirrorPool, MirrorState, MirrorStatus, MirrorStore,
     ResolvedMirror, LOGIN_STUB_MARKERS,
 };
-pub use parse::{catalog_url, parse_cards, parse_details, parse_last_page, search_url};
+pub use parse::{
+    catalog_url, collection_url, parse_cards, parse_collections, parse_details, parse_last_page,
+    search_url,
+};
 pub use sanitize::{contains_email, sanitize_page};
 pub use session::{
     ensure_logged_in, login, login_and_remember, Credentials, KeychainSecretStore,

@@ -26,6 +26,17 @@ pub struct MediaItem {
     pub rating: Option<f32>,
 }
 
+/// Курируемая коллекция HDrezka (не тип произведения, не жанр — отдельная сущность).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Collection {
+    pub id: u64,
+    pub title: String,
+    /// Полный URL коллекции (как со страницы, с slug).
+    pub url: Url,
+    pub poster_url: Option<Url>,
+    pub items_count: Option<u32>,
+}
+
 /// Полная карточка произведения со страницы деталей.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MediaDetails {
@@ -148,6 +159,25 @@ mod tests {
             season_id: 1,
             episode_id: 3,
             title: "3 серия".to_string(),
+        });
+    }
+
+    #[test]
+    fn collection_roundtrip() {
+        roundtrip(&Collection {
+            id: 5,
+            title: "Оскар 2026".to_string(),
+            url: Url::parse("https://kvk.pub/collections/5-oskar-2026/").unwrap(),
+            poster_url: Some(Url::parse("https://kvk.pub/collections/5.jpg").unwrap()),
+            items_count: Some(24),
+        });
+        // Минимальный вариант: обложка и счётчик не обязательны.
+        roundtrip(&Collection {
+            id: 7,
+            title: "Без обложки".to_string(),
+            url: Url::parse("https://kvk.pub/collections/7.html").unwrap(),
+            poster_url: None,
+            items_count: None,
         });
     }
 

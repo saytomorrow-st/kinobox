@@ -4,8 +4,9 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use kino_ipc::{
-    BootState, CatalogSortDto, EpisodeDto, IpcError, MediaDetailsDto, MediaItemDto, MediaKindDto,
-    MirrorDto, PlayerErrorDto, PlayerProgressDto, StreamQualityDto, TranslatorId, UserDto,
+    BootState, CatalogSortDto, CollectionDto, EpisodeDto, IpcError, MediaDetailsDto, MediaItemDto,
+    MediaKindDto, MirrorDto, PlayerErrorDto, PlayerProgressDto, StreamQualityDto, TranslatorId,
+    UserDto,
 };
 use kino_player::{EndReason, PlayerEvent, WindowRenderTarget, WindowedPlayer};
 use tauri::{AppHandle, Emitter, State, Window};
@@ -174,6 +175,26 @@ pub async fn details(
 ) -> Result<MediaDetailsDto, IpcError> {
     log::debug!("cmd details: id={}", item.id);
     service.details(item).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn collections(service: State<'_, Service>) -> Result<Vec<CollectionDto>, IpcError> {
+    log::debug!("cmd collections");
+    let items = service.collections().await?;
+    log::debug!("cmd collections: ok, {} коллекций", items.len());
+    Ok(items)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn collection_items(
+    service: State<'_, Service>,
+    collection: CollectionDto,
+    page: u32,
+) -> Result<Vec<MediaItemDto>, IpcError> {
+    log::debug!("cmd collection_items: id={}, page={page}", collection.id);
+    service.collection_items(collection, page).await
 }
 
 #[tauri::command]

@@ -21,6 +21,8 @@ export const commands = {
 	catalog: (kind: MediaKindDto | null, page: number, sort: CatalogSortDto | null, genre: string | null, options?: InvokeOptions) => typedError<MediaItemDto[], IpcError>(__TAURI_INVOKE("catalog", { kind, page, sort, genre }, options)),
 	search: (query: string, options?: InvokeOptions) => typedError<MediaItemDto[], IpcError>(__TAURI_INVOKE("search", { query }, options)),
 	details: (item: MediaItemDto, options?: InvokeOptions) => typedError<MediaDetailsDto, IpcError>(__TAURI_INVOKE("details", { item }, options)),
+	collections: (options?: InvokeOptions) => typedError<CollectionDto[], IpcError>(__TAURI_INVOKE("collections", undefined, options)),
+	collectionItems: (collection: CollectionDto, page: number, options?: InvokeOptions) => typedError<MediaItemDto[], IpcError>(__TAURI_INVOKE("collection_items", { collection, page }, options)),
 	episodes: (details: MediaDetailsDto, options?: InvokeOptions) => typedError<EpisodeDto[], IpcError>(__TAURI_INVOKE("episodes", { details }, options)),
 	/**
 	 *  Потоки уже после деобфускации. `translator_id = None` — перевод по умолчанию; `episode`
@@ -68,6 +70,15 @@ export type BootState =
 
 /**  Сортировка/фильтр каталога (соответствует `filter=` HDrezka). */
 export type CatalogSortDto = "last" | "popular" | "soon" | "watching";
+
+/**  Курируемая коллекция HDrezka (не тип произведения, не жанр — отдельная сущность). */
+export type CollectionDto = {
+	id: number,
+	title: string,
+	url: string,
+	posterUrl: string | null,
+	itemsCount: number | null,
+};
 
 /**  Одна серия сериала. */
 export type EpisodeDto = {

@@ -5,7 +5,8 @@
 //! (`cdn::extract_player_data`) и AJAX `/ajax/get_cdn_series/`.
 
 use kino_core::{
-    CatalogQuery, Episode, KinoError, KinoProvider, MediaDetails, MediaItem, Result, StreamQuality,
+    CatalogQuery, Collection, Episode, KinoError, KinoProvider, MediaDetails, MediaItem, Result,
+    StreamQuality,
 };
 
 use crate::api::HdrezkaApi;
@@ -26,6 +27,13 @@ impl KinoProvider for HdrezkaApi {
         HdrezkaApi::details(self, item).await
     }
 
+    async fn collections(&self) -> Result<Vec<Collection>> {
+        HdrezkaApi::collections(self).await
+    }
+
+    async fn collection_items(&self, collection: &Collection, page: u32) -> Result<Vec<MediaItem>> {
+        HdrezkaApi::collection_items(self, collection, page).await
+    }
     async fn episodes(&self, details: &MediaDetails) -> Result<Vec<Episode>> {
         if details.seasons.is_empty() {
             return Ok(Vec::new());
