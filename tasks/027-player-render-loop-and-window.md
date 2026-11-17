@@ -1,7 +1,7 @@
 ---
 id: 027
 type: bug
-status: review
+status: done
 model: deepseek-v4-pro
 crate: kino-player, kino-ipc
 created: 2026-11-17
@@ -174,7 +174,8 @@ macOS 13.7.8). На ней:
 `tauri.conf.json` — корни независимы (разные слои), но правятся в одном PR
 т.к. соседние по коду.
 
-Реализация (deepseek-v4-pro, 17.11.2026):
+Реализация влита: PR #29, merge commit `00ea924` (17.11.2026). CI на PR зелёный: rust, bindings, ui; одиночный rerun UI прошёл после временной нехватки hosted runner. Свежий dev build `44113442158` на `main` запущен для проверки на реальном Intel Mac; результат ожидается.
+
 
 - **Баг #3** (redraw-цикл): `commands.rs::attach_player` теперь принимает
   `shared: Arc<Mutex<Option<WindowedPlayer>>>` и после `attach` вызывает
