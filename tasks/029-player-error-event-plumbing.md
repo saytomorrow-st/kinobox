@@ -1,7 +1,7 @@
 ---
 id: 029
 type: bug
-status: open
+status: in-review
 model: deepseek-v4-pro
 crate: kino-player, kino-ipc, src-tauri, ui
 created: 2026-11-17
@@ -114,3 +114,46 @@ mpv (после того как `loadfile` уже принят) и UI.
 подтверждённый отсутствующий путь `PlayerEvent::EndOfFile(Error)`/`Error(msg)`
 → `start_progress_thread`'s `_ => false` catch-all → ничего не долетает до
 фронтенда.
+
+Выполнено — deepseek-v4-pro, 17.11.2026. Сделано:
+
+- `kino-ipc`: добавлен `PlayerErrorDto { message: String }` (camelCase, specta::Type)
+  в `dto.rs`, реэкспорт из `lib.rs`, тест `player_error_dto_is_camel_case`,
+  `CRATE.md` обновлён.
+- `src-tauri/commands.rs::start_progress_thread`: на `PlayerEvent::EndOfFile(Error)`
+  и `PlayerEvent::Error(_)` эмитится событие `player-error` с русским текстом
+  `PLAYBACK_ERROR_MESSAGE = "Не удалось воспроизвести поток. Попробуйте другую
+  озвучку или качество."` (без технических деталей mpv и без утечки URL/токенов —
+  техническая причина логируется в `events.rs` у источника). Нормальный
+  `EndOfFile(Eof)` ошибкой не считается.
+- `ui/src/api.ts`: тип `PlayerErrorDto` (вручную, как `PlayerProgressDto` — событие
+  сырое `emit_to`, specta его в `bindings.ts` не генерирует, что подтвердил CI-джоб
+  `bindings` — прошёл без diff).
+- `ui/src/player-store.ts`: вторая подписка на `player-error` в `init()`
+  (отдельный `unlistenError`, закрывается в `dispose()`), выставляет `error` в сторе.
+- `PlayerControlsView` рендерит `error` уже как есть — не трогал.
+- `ui/src/player-store.test.ts`: мок `listen` переписан на реестр по имени события,
+  добавлены тесты подписки на оба события и эмуляции `player-error`.
+
+Нюансы:
+
+- Локально прогнаны только UI-тесты (`pnpm test`, 120 passed) и `pnpm typecheck`
+  (чисто); Rust (`kino-ipc`→`kino-player`→`-lmpv`) не компилировался локально —
+  только CI.
+- `cargo fmt --check` на моих файлах чистый; в выводе fmt есть несвязанные diffs
+  в `crates/kino-api/*` — это параллельная незакоммиченная работа другой сессии
+  (#030/#032), не моя, в мой коммит не входит.
+- Гонка с параллельными сессиями: коммит изначально упал на чужую ветку
+  `fix/031-...` (другая сессия переключила ветку), пересажен через `cherry-pick`
+  на `fix/029-player-error-event-plumbing` (`32a62f4`), `fix/031` возвращён к
+  `a3acb23`. В коммит вошли только 8 файлов этой задачи.
+
+Статус CI: зелёный. `rust` pass (5m20s), `bindings` pass (2m17s), `ui` pass (40s).
+Первый прогон `ui` упал по transient infra («The job was not acquired by Runner…
+hosted even after multiple attempts» — capacity constraints macOS arm64), не по
+коду; перезапущен `gh run rerun --failed`, на повторе зелёный.
+
+PR: https://github.com/saytomorrow-st/kinobox/pull/32 (мерж — за lead-агентом).
+
+Живая проверка (реальный мёртвый стрим → видимое сообщение вместо серого экрана) —
+только у заказчика; юнит-тестом эмулируется в `player-store.test.ts`.
