@@ -302,6 +302,10 @@ jobs:
           brew tap homebrew/core
           MPV_FORMULA="$(brew --repository homebrew/core)/Formula/m/mpv.rb"
           perl -pi -e 's/(-Dbuild-date=false)/$1\n    -Dcplayer=false\n    -Dmacos-touchbar=disabled\n    -Dmacos-media-player=disabled\n    -Dswift-flags=-target\\ x86_64-apple-macosx13.0\n    -Dc_args=-mmacosx-version-min=13.0\n    -Dobjc_args=-mmacosx-version-min=13.0\n    -Dc_link_args=-mmacosx-version-min=13.0\n    -Dobjc_link_args=-mmacosx-version-min=13.0/' "$MPV_FORMULA"
+          # -Dcplayer=false отключает мезоновский install_data для
+          # bash-completion, но formula.install всё равно безусловно его
+          # ждёт (bash_completion.install share/"...") — убираем эту строку.
+          perl -ni -e 'print unless /bash_completion\.install/' "$MPV_FORMULA"
           grep -q 'Dswift-flags' "$MPV_FORMULA" || {
             echo "ERROR: patch did not apply to mpv.rb (upstream formula changed?)" >&2
             exit 1
@@ -423,6 +427,10 @@ jobs:
           brew tap homebrew/core
           MPV_FORMULA="$(brew --repository homebrew/core)/Formula/m/mpv.rb"
           perl -pi -e 's/(-Dbuild-date=false)/$1\n    -Dcplayer=false\n    -Dmacos-touchbar=disabled\n    -Dmacos-media-player=disabled\n    -Dswift-flags=-target\\ x86_64-apple-macosx13.0\n    -Dc_args=-mmacosx-version-min=13.0\n    -Dobjc_args=-mmacosx-version-min=13.0\n    -Dc_link_args=-mmacosx-version-min=13.0\n    -Dobjc_link_args=-mmacosx-version-min=13.0/' "$MPV_FORMULA"
+          # -Dcplayer=false отключает мезоновский install_data для
+          # bash-completion, но formula.install всё равно безусловно его
+          # ждёт (bash_completion.install share/"...") — убираем эту строку.
+          perl -ni -e 'print unless /bash_completion\.install/' "$MPV_FORMULA"
           grep -q 'Dswift-flags' "$MPV_FORMULA" || {
             echo "ERROR: patch did not apply to mpv.rb (upstream formula changed?)" >&2
             exit 1
