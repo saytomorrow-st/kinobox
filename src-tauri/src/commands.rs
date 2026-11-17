@@ -1,6 +1,7 @@
 //! Тонкие обёртки над `AppService`. Логики здесь нет, кроме управления окнами и плеером.
 
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use kino_ipc::{
     BootState, EpisodeDto, IpcError, MediaDetailsDto, MediaItemDto, MediaKindDto, MirrorDto,
@@ -23,7 +24,19 @@ fn redact_url_for_log(raw: &str) -> &str {
 #[specta::specta]
 pub async fn boot(app: AppHandle, service: State<'_, Service>) -> Result<BootState, IpcError> {
     log::debug!("cmd boot");
-    let state = service.boot().await;
+    // Предохранитель #032: `service.boot()` не висит вечно, если застрянет на доступе
+    // к Keychain. По истечении 60с показываем тот же Unavailable-экран, что и при сбое
+    // сети/зеркал, а не вечное «Подключение…».
+    const BOOT_TIMEOUT_MESSAGE: &str = "Запуск занял слишком много времени. Попробуйте ещё раз.";
+    let state = match tokio::time::timeout(Duration::from_secs(60), service.boot()).await {
+        Ok(state) => state,
+        Err(_) => {
+            log::error!("cmd boot: таймаут 60с — вероятно зависание доступа к Keychain");
+            BootState::Unavailable {
+                message: BOOT_TIMEOUT_MESSAGE.to_string(),
+            }
+        }
+    };
     let shown = match state {
         BootState::SignedIn { .. } => windows::enter_main(&app),
         BootState::NeedsLogin { .. } | BootState::Unavailable { .. } => {

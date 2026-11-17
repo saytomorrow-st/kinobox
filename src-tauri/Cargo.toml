@@ -29,4 +29,4 @@ specta.workspace = true
 specta-typescript.workspace = true
 tauri-plugin-log.workspace = true
 log.workspace = true
-tokio = { workspace = true, features = ["sync"] }
+tokio = { workspace = true, features = ["sync", "time"] }
