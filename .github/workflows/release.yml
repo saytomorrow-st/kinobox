@@ -29,7 +29,11 @@ jobs:
       # по пути Homebrew отклоняет: "requires formulae to be in a tap") и
       # собираем mpv из исходников с отключённым Swift; зависимости остаются
       # бутылками.
+      # HOMEBREW_NO_INSTALL_FROM_API=1 обязателен: иначе brew резолвит
+      # формулу из своего JSON API, игнорируя патч в локальном чекауте тапа.
       - name: Install mpv (x86_64, built from source, Swift disabled — bug #11)
+        env:
+          HOMEBREW_NO_INSTALL_FROM_API: "1"
         run: |
           set -euo pipefail
           brew tap homebrew/core

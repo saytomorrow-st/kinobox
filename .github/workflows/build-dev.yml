@@ -279,7 +279,14 @@ jobs:
       # патчим формулу ПРЯМО в чекауте тапа homebrew-core и ставим по имени.
       # Зависимости (ffmpeg, libass, ...) остаются обычными бутылками —
       # Swift-символ есть только в самом mpv.
+      #
+      # HOMEBREW_NO_INSTALL_FROM_API=1 обязателен: иначе brew резолвит
+      # формулу из своего JSON API (кэш ghcr.io), игнорируя патч в
+      # локальном чекауте тапа — подтверждено логом ("API Source mpv.rb",
+      # установилась неизменённая 0.41.0_8 вместо патченной 0.42.0).
       - name: Install mpv (x86_64, built from source, Swift disabled — bug #11)
+        env:
+          HOMEBREW_NO_INSTALL_FROM_API: "1"
         run: |
           set -euo pipefail
           brew tap homebrew/core
@@ -392,7 +399,11 @@ jobs:
       # macOS 14+. Собираем из исходников с отключённым Swift, патчим формулу
       # прямо в чекауте тапа homebrew-core (install по пути отклоняется
       # Homebrew'ом: "requires formulae to be in a tap").
+      # HOMEBREW_NO_INSTALL_FROM_API=1 обязателен: иначе brew резолвит
+      # формулу из своего JSON API, игнорируя патч в локальном чекауте тапа.
       - name: Install mpv (x86_64, built from source, Swift disabled — bug #11)
+        env:
+          HOMEBREW_NO_INSTALL_FROM_API: "1"
         run: |
           set -euo pipefail
           brew tap homebrew/core
