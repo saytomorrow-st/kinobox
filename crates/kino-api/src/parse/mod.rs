@@ -11,6 +11,7 @@ mod details;
 mod search;
 
 pub use catalog::{catalog_url, parse_cards, parse_last_page};
+pub(crate) use details::extract_favs;
 pub use details::parse_details;
 pub use search::search_url;
 
