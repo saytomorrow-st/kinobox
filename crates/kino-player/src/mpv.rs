@@ -53,11 +53,13 @@ impl Player {
 
     /// Запускает воспроизведение, если оно на паузе.
     pub fn play(&self) -> libmpv2::Result<()> {
+        log::debug!("mpv play");
         self.mpv.set_property("pause", false)
     }
 
     /// Ставит воспроизведение на паузу.
     pub fn pause(&self) -> libmpv2::Result<()> {
+        log::debug!("mpv pause");
         self.mpv.set_property("pause", true)
     }
 
@@ -68,6 +70,7 @@ impl Player {
 
     /// Перематывает на абсолютную позицию в секундах от начала файла.
     pub fn seek_to(&self, seconds: f64) -> libmpv2::Result<()> {
+        log::debug!("mpv seek: {seconds}");
         self.mpv
             .command("seek", &[&seconds.to_string(), "absolute"])
     }

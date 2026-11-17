@@ -21,7 +21,10 @@ impl<S: SecretStore, M: MirrorStore> AppService<S, M> {
 
         let credentials = match self.secrets.load().await {
             Ok(Some(credentials)) => credentials,
-            Ok(None) => return BootState::NeedsLogin { email: None },
+            Ok(None) => {
+                log::info!("boot: сохранённых данных нет — нужен вход");
+                return BootState::NeedsLogin { email: None };
+            }
             Err(err) => return unavailable(&err),
         };
         let mirror = match self.pool.resolve().await {
@@ -34,11 +37,15 @@ impl<S: SecretStore, M: MirrorStore> AppService<S, M> {
             Ok(session) => {
                 let user = UserDto::from(&session);
                 self.set_session(Some(session));
+                log::info!("boot: тихий вход выполнен, user_id={}", user.user_id);
                 BootState::SignedIn { user }
             }
-            Err(KinoError::LoginRejected(_)) => BootState::NeedsLogin {
-                email: Some(credentials.email),
-            },
+            Err(KinoError::LoginRejected(_)) => {
+                log::info!("boot: сохранённые данные отклонены — нужен вход");
+                BootState::NeedsLogin {
+                    email: Some(credentials.email),
+                }
+            }
             Err(err) => unavailable(&err),
         }
     }
@@ -60,6 +67,7 @@ impl<S: SecretStore, M: MirrorStore> AppService<S, M> {
             login_and_remember(&self.client(), &mirror, &self.secrets, &credentials).await?;
         let user = UserDto::from(&session);
         self.set_session(Some(session));
+        log::info!("login: вход выполнен, user_id={}", user.user_id);
         Ok(user)
     }
 
@@ -69,6 +77,7 @@ impl<S: SecretStore, M: MirrorStore> AppService<S, M> {
         self.secrets.clear().await?;
         self.set_session(None);
         self.reset_client()?;
+        log::info!("logout: сессия сброшена");
         Ok(())
     }
 }

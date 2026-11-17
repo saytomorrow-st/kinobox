@@ -80,8 +80,22 @@ impl Player {
     pub fn next_event(&self, timeout: f64) -> Option<PlayerEvent> {
         match self.mpv().wait_event(timeout) {
             None => None,
-            Some(Ok(event)) => Some(map_event(event)),
-            Some(Err(err)) => Some(PlayerEvent::Error(err.to_string())),
+            Some(Ok(event)) => {
+                let mapped = map_event(event);
+                // Сбой воспроизведения — это то, что заказчик видит как «не удалось
+                // запустить воспроизведение». Логируем причину здесь, у источника.
+                if let PlayerEvent::EndOfFile(EndReason::Error) = mapped {
+                    log::error!("mpv: файл завершился с ошибкой");
+                }
+                if let PlayerEvent::Error(ref message) = mapped {
+                    log::error!("mpv: {message}");
+                }
+                Some(mapped)
+            }
+            Some(Err(err)) => {
+                log::error!("mpv: ошибка события: {err}");
+                Some(PlayerEvent::Error(err.to_string()))
+            }
         }
     }
 }

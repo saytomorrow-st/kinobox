@@ -6,7 +6,8 @@ mod state;
 mod windows;
 
 use specta_typescript::Typescript;
-use tauri::Wry;
+use tauri::{Manager, Wry};
+use tauri_plugin_log::{Target, TargetKind};
 use tauri_specta::{collect_commands, Builder, ErrorHandlingMode};
 
 const BINDINGS_HEADER: &str =
@@ -56,12 +57,54 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         eprintln!("Привязки TypeScript не записаны: {err}");
     }
 
+    install_panic_hook();
+
+    // Двойная запись: в stdout (Console.app при живом запуске) и в файл
+    // `~/Library/Logs/app.kinobox.desktop/` (LogDir). Уровень в debug-сборке
+    // Debug, в release — Info, чтобы не тащить шум в боевые логи.
+    let level = if cfg!(debug_assertions) {
+        log::LevelFilter::Debug
+    } else {
+        log::LevelFilter::Info
+    };
+
     tauri::Builder::default()
+        .plugin(
+            tauri_plugin_log::Builder::new()
+                .targets([
+                    Target::new(TargetKind::Stdout),
+                    Target::new(TargetKind::LogDir { file_name: None }),
+                ])
+                .level(level)
+                .build(),
+        )
+        .setup(|app| {
+            // Логгер подключён плагином раньше этого хука, поэтому сообщение о
+            // пути к файлу попадает и в сам файл, и в stdout/Console.app. По этому
+            // пути заказчик присылает лог при диагностике.
+            let log_dir = app.path().app_log_dir()?;
+            let file = log_dir.join("KinoBox.log");
+            log::info!("лог-файл: {}", file.display());
+            Ok(())
+        })
         .manage(service)
         .manage(player_state::PlayerState::default())
         .invoke_handler(builder.invoke_handler())
         .run(tauri::generate_context!())?;
     Ok(())
+}
+
+/// Паника в Tauri-команде иначе просто завершает процесс без следа. Хук логирует
+/// её через `log::error!`, чтобы сообщение попало и в Console.app, и в файл, до
+/// того как процесс упадёт.
+fn install_panic_hook() {
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        // `log` может быть ещё не инициализирован (паника до подключения плагина) —
+        // тогда сообщение уходит только на stderr и в Console.app.
+        log::error!("паника: {info}");
+        default_hook(info);
+    }));
 }
 
 fn bindings_path() -> std::path::PathBuf {

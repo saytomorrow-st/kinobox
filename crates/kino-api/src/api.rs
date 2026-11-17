@@ -50,15 +50,21 @@ impl HdrezkaApi {
             return Ok(Vec::new());
         }
         let url = search_url(&self.base, query, page)?;
+        log::debug!("поиск: {}", redact_url(&url));
         let html = self.client.get(&url).await?.text();
-        parse_cards(&html, &url)
+        let items = parse_cards(&html, &url)?;
+        log::info!("поиск: {} элементов", items.len());
+        Ok(items)
     }
 
     /// Страница каталога; `page` нумеруется с 1.
     pub async fn catalog(&self, query: CatalogQuery) -> Result<Vec<MediaItem>> {
         let url = catalog_url(&self.base, query.kind, query.page)?;
+        log::debug!("каталог: {}", redact_url(&url));
         let html = self.client.get(&url).await?.text();
-        parse_cards(&html, &url)
+        let items = parse_cards(&html, &url)?;
+        log::info!("каталог: {} элементов", items.len());
+        Ok(items)
     }
 
     /// Подробная карточка по элементу каталога.
@@ -68,6 +74,7 @@ impl HdrezkaApi {
 
     /// Подробная карточка по адресу страницы.
     pub async fn details_at(&self, page_url: &Url) -> Result<MediaDetails> {
+        log::debug!("детали: {}", redact_url(page_url));
         let html = self.client.get(page_url).await?.text();
         parse_details(&html, page_url)
     }
@@ -90,8 +97,20 @@ impl HdrezkaApi {
             ("translator_id", translator.as_str()),
             ("action", "get_episodes"),
         ];
+        log::debug!("серии: id={id} translator_id={translator}");
         let reply = self.client.post_form(&url, &form).await?;
-        let value = parse_cdn_json(&reply.text(), "get_episodes")?;
+        let text = reply.text();
+        let value = match parse_cdn_json(&text, "get_episodes") {
+            Ok(value) => value,
+            Err(err) => {
+                log::warn!(
+                    "серии: не распарсился ответ (HTTP {}): {}",
+                    reply.status,
+                    describe_parse_failure(&text)
+                );
+                return Err(err);
+            }
+        };
 
         let episodes = value
             .get("episodes")
@@ -108,6 +127,7 @@ impl HdrezkaApi {
             })?;
             map.insert(season_id, parse_episodes_html(html, season_id)?);
         }
+        log::info!("серии: {} сезонов распарсено", map.len());
         Ok(map)
     }
 
@@ -143,12 +163,33 @@ impl HdrezkaApi {
         }
 
         let reply = self.client.post_form(&url, &form).await?;
-        let value = parse_cdn_json(&reply.text(), "get_stream")?;
+        let text = reply.text();
+        let value = match parse_cdn_json(&text, "get_stream") {
+            Ok(value) => value,
+            Err(err) => {
+                log::warn!(
+                    "потоки: не распарсился ответ (HTTP {}): {}",
+                    reply.status,
+                    describe_parse_failure(&text)
+                );
+                return Err(err);
+            }
+        };
         let raw = value
             .get("url")
             .and_then(serde_json::Value::as_str)
             .ok_or_else(|| KinoError::Parse("get_stream: нет поля url".to_string()))?;
-        deobfuscate(raw)
+        let qualities = deobfuscate(raw)?;
+        log::info!(
+            "потоки: {} качеств ({})",
+            qualities.len(),
+            qualities
+                .iter()
+                .map(|q| q.label.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        Ok(qualities)
     }
 
     fn cdn_series_url(&self) -> Result<Url> {
@@ -179,6 +220,30 @@ fn site_root(mirror: Url) -> Url {
     base.set_query(None);
     base.set_fragment(None);
     base
+}
+
+/// URL для лога без query и fragment — там могут быть токены/подписи CDN.
+fn redact_url(url: &Url) -> String {
+    let mut bare = url.clone();
+    bare.set_query(None);
+    bare.set_fragment(None);
+    bare.to_string()
+}
+
+/// Фрагмент тела ответа для диагностики сбоя парсинга. Обрезается до разумной длины
+/// и вычищается от переносов строк, чтобы не замусорить лог; секретов в ответах
+/// `get_episodes`/`get_stream` не бывает (это публичные данные о сериях/потоках).
+fn describe_parse_failure(body: &str) -> String {
+    const MAX_LEN: usize = 200;
+    let snippet: String = body.chars().take(MAX_LEN).collect();
+    let snippet = snippet.split_whitespace().collect::<Vec<_>>().join(" ");
+    if snippet.is_empty() {
+        "(пустое тело)".to_string()
+    } else if body.chars().count() > MAX_LEN {
+        format!("{snippet}…")
+    } else {
+        snippet
+    }
 }
 
 #[cfg(test)]

@@ -37,6 +37,7 @@ pub fn deobfuscate(raw: &str) -> Result<Vec<StreamQuality>> {
         return Err(KinoError::Deobfuscation("пустой вход".to_string()));
     }
 
+    let obfuscated = trimmed.starts_with("#h");
     let plain = match trimmed.strip_prefix("#h") {
         Some(rest) => {
             let joined: String = rest.split("//_//").collect();
@@ -51,7 +52,17 @@ pub fn deobfuscate(raw: &str) -> Result<Vec<StreamQuality>> {
         None => trimmed.to_string(),
     };
 
-    parse_qualities(&plain)
+    let qualities = parse_qualities(&plain)?;
+    log::debug!(
+        "деобфускация{}: {} качеств",
+        if obfuscated {
+            " (обфусцировано)"
+        } else {
+            ""
+        },
+        qualities.len()
+    );
+    Ok(qualities)
 }
 
 /// base64-decode стандартным алфавитом; отсутствие `=`-padding допускается.

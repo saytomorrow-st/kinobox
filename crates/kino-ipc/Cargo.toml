@@ -16,6 +16,7 @@ specta.workspace = true
 specta-typescript.workspace = true
 url.workspace = true
 futures-util.workspace = true
+log.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true

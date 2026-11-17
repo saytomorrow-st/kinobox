@@ -339,6 +339,7 @@ impl<S: MirrorStore> MirrorPool<S> {
             (MirrorState::Dead, Some(reason)) => Some(KinoError::Parse(reason.clone())),
             _ => None,
         };
+        log_probe(url, &state, reason.as_deref(), Some(elapsed));
         Probe {
             status: MirrorStatus {
                 url: url.clone(),
@@ -354,6 +355,7 @@ impl<S: MirrorStore> MirrorPool<S> {
 
 impl Probe {
     fn failed(url: &Url, state: MirrorState, reason: String, error: KinoError) -> Self {
+        log_probe(url, &state, Some(&reason), None);
         Self {
             status: MirrorStatus {
                 url: url.clone(),
@@ -364,6 +366,22 @@ impl Probe {
             final_url: None,
             error: Some(error),
         }
+    }
+}
+
+/// Результат health-check одного зеркала в лог. `mirror_key` отдаёт только
+/// `scheme://host:port` — без пути/query, где могли бы оказаться секреты.
+fn log_probe(url: &Url, state: &MirrorState, reason: Option<&str>, latency: Option<Duration>) {
+    let latency = latency
+        .map(|d| format!(", {}мс", d.as_millis()))
+        .unwrap_or_default();
+    match reason {
+        Some(reason) => log::info!(
+            "зеркало {}: {:?} ({reason}){latency}",
+            mirror_key(url),
+            state
+        ),
+        None => log::info!("зеркало {}: {:?}{latency}", mirror_key(url), state),
     }
 }
 
